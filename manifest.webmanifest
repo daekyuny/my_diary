@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "My Diary · 하루의 조각",
+  "short_name": "My Diary",
+  "description": "내 구글 드라이브에 간직하는 하루의 기록",
+  "lang": "ko",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f8f2",
+  "theme_color": "#f7f8f2",
+  "icons": [
+    {
+      "src": "/assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

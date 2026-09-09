@@ -22,3 +22,11 @@ Desktop.ini
 # Local agent configuration
 /.agents/
 /.codex/
+
+node_modules/
+dist/
+playwright-report/
+test-results/
+.wrangler/
+.dev.vars
+config.local.json

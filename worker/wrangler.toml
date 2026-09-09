@@ -1,0 +1,15 @@
+name = "my-diary-notify"
+main = "index.js"
+compatibility_date = "2026-09-01"
+
+[triggers]
+# Five minutes keeps KV list operations within the Free tier for a personal app.
+crons = ["*/5 * * * *"]
+
+[vars]
+APP_ORIGIN = "https://YOUR_PROJECT.web.app"
+VAPID_SUBJECT = "mailto:YOUR_EMAIL@example.com"
+
+[[kv_namespaces]]
+binding = "REMINDERS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
