@@ -1273,6 +1273,7 @@ async function start() {
   });
   bind();
   initialized = true;
+  $('#edit-entry').disabled = false;
   $('#editor-fields').disabled = false;
   updateConnection();
   if ('serviceWorker' in navigator)

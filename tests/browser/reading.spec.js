@@ -111,3 +111,20 @@ test('Keep tag cleanup preserves history and calendar view opens multiple entrie
     true,
   );
 });
+
+test('editing becomes available only after initial settings have loaded', async ({ page }) => {
+  let release;
+  const ready = new Promise((resolve) => {
+    release = resolve;
+  });
+  await page.route('**/config.json', async (route) => {
+    await ready;
+    await route.fulfill({ json: {} });
+  });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(page.locator('#edit-entry')).toBeDisabled();
+  release();
+  await page.locator('#edit-entry').click();
+  await expect(page.locator('#editor-fields')).toBeVisible();
+  await expect(page.locator('#preview')).toBeHidden();
+});
