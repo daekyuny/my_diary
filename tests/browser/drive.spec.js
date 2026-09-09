@@ -7,6 +7,15 @@ async function mockGoogle(page) {
   const files = [];
   const state = { failUpload: false, files, calendarTitle: '프로젝트 회의', calendarVisible: true };
   await page.addInitScript(() => {
+    // WebKit's request interception omits Blob POST bodies. Capture the actual
+    // serialized upload before fetch so all browsers verify the same payload.
+    window.diaryTestUploadBodies = [];
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input, options) => {
+      if (String(input).includes('/upload/drive/v3/files') && options?.body instanceof Blob)
+        window.diaryTestUploadBodies.push(await options.body.text());
+      return originalFetch(input, options);
+    };
     localStorage.setItem(
       'my-diary-settings',
       JSON.stringify({ googleClientId: 'test.apps.googleusercontent.com' }),
@@ -64,12 +73,13 @@ async function mockGoogle(page) {
       });
     }
     if (url.pathname === '/upload/drive/v3/files') {
+      const capturedBody = await page.evaluate(() => window.diaryTestUploadBodies.shift());
       if (state.failUpload)
         return route.fulfill({
           status: 503,
           json: { error: { message: 'temporary test failure' } },
         });
-      const body = route.request().postData();
+      const body = route.request().postData() ?? capturedBody;
       const metadata = JSON.parse(body.split('\r\n\r\n')[1].split('\r\n--')[0]);
       const content = body.slice(body.indexOf('---\n')).split('\r\n--')[0];
       const id = `file-${files.length + 1}`;
