@@ -22,9 +22,26 @@ function run(store, mode, action) {
       reject(tx.error || new Error('기기에 저장하지 못했습니다. 저장공간을 확인해주세요.'));
   });
 }
-export const all = (store) => run(store, 'readonly', (table) => table.getAll());
-export const get = (store, id) => run(store, 'readonly', (table) => table.get(id));
-export const put = (store, value) => run(store, 'readwrite', (table) => table.put(value));
+function restoreAsset(store, value) {
+  if (store !== 'assets' || !value?.blobBytes) return value;
+  const { blobBytes, blobType, ...asset } = value;
+  return { ...asset, blob: new Blob([blobBytes], { type: blobType }) };
+}
+export const all = async (store) =>
+  (await run(store, 'readonly', (table) => table.getAll())).map((value) =>
+    restoreAsset(store, value),
+  );
+export const get = async (store, id) =>
+  restoreAsset(store, await run(store, 'readonly', (table) => table.get(id)));
+export async function put(store, value) {
+  if (store === 'assets' && value.blob instanceof Blob) {
+    // Store bytes before opening the transaction: WebKit can reject Blob/File IDB writes.
+    // Readers still accept older records that contain a Blob directly.
+    const { blob, ...asset } = value;
+    value = { ...asset, blobBytes: await blob.arrayBuffer(), blobType: blob.type };
+  }
+  return run(store, 'readwrite', (table) => table.put(value));
+}
 export const remove = (store, id) => run(store, 'readwrite', (table) => table.delete(id));
 
 export function readSettings() {

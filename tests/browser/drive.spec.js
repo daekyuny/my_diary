@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { makeRevision, parseRevision, revisionFile } from '../../src/model.js';
 
+test.use({ serviceWorkers: 'block' });
+
 async function mockGoogle(page) {
   const files = [];
   const state = { failUpload: false, files, calendarTitle: '프로젝트 회의', calendarVisible: true };

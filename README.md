@@ -38,7 +38,7 @@ npm run preview
 git diff --check
 ```
 
-`build`는 `dist/`를 생성하며 `preview`도 4173 포트를 사용합니다. 테스트 캡처는 `artifacts/`, 실패 추적은 `test-results/`에 생성됩니다. WebKit 테스트는 Linux에 시스템 라이브러리가 필요할 수 있습니다: `npx playwright install-deps webkit` (관리자 권한 필요). 브라우저 에뮬레이션은 실제 iPhone 알림 수신 검증을 대체하지 않습니다.
+`build`는 `dist/`를 생성하며 `preview`도 4173 포트를 사용합니다. 테스트 캡처는 `artifacts/`, 실패 추적은 `test-results/`에 생성됩니다. 서비스 워커를 통한 오프라인 재접속 테스트는 Playwright 지원 범위에 따라 Chromium에서 실행하고 WebKit에서는 건너뜁니다. 외부 API 모의 테스트는 서비스 워커를 차단해 실제 API로 요청이 나가지 않도록 합니다. WebKit 테스트는 Linux에 시스템 라이브러리가 필요할 수 있습니다: `npx playwright install-deps webkit` (관리자 권한 필요). 브라우저 에뮬레이션은 실제 iPhone 알림 수신 검증을 대체하지 않습니다.
 
 ## Google 연결
 

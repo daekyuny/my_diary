@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+test.use({ serviceWorkers: 'block' });
+
 test.beforeEach(async ({ page }) => {
   await page.route('https://accounts.google.com/**', (route) => route.abort());
   await page.goto('/');
@@ -72,6 +74,14 @@ test('photo insertion and ZIP export/import preserve image bytes and text', asyn
   await restored.locator('#new-entry').click();
   await expect(restored.locator('#entry-title')).toHaveValue('사진과 함께');
   await expect(restored.locator('.image-tile img')).toBeVisible();
+  const restoredBytes = await restored.evaluate(async () => {
+    const storage = await import('/src/storage.js');
+    const [asset] = await storage.all('assets');
+    return Array.from(new Uint8Array(await asset.blob.arrayBuffer()));
+  });
+  expect(Buffer.from(restoredBytes).toString('base64')).toBe(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=',
+  );
   await fresh.close();
 });
 
@@ -138,25 +148,33 @@ test('capture first-version layout', async ({ page }, testInfo) => {
   await page.screenshot({ path: `artifacts/${testInfo.project.name}.png`, fullPage: true });
 });
 
-test('offline shell reload keeps edits pending and recovers interrupted drafts', async ({
-  page,
-  context,
-}) => {
-  await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
-  await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
-  await page.locator('#entry-title').fill('오프라인 기록');
-  await page.locator('#entry-body').fill('네트워크 없이 기억한 숫자 4567');
-  await page.waitForFunction(async () => {
-    const storage = await import('/src/storage.js');
-    return (await storage.all('drafts')).some((draft) => draft.entry.body.includes('4567'));
+test.describe('service worker offline storage', () => {
+  test.use({ serviceWorkers: 'allow' });
+  test('offline shell reload keeps edits pending and recovers interrupted drafts', async ({
+    page,
+    context,
+    browserName,
+  }) => {
+    test.skip(
+      browserName !== 'chromium',
+      'Playwright service-worker offline emulation is supported on Chromium.',
+    );
+    await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+    await page.locator('#entry-title').fill('오프라인 기록');
+    await page.locator('#entry-body').fill('네트워크 없이 기억한 숫자 4567');
+    await page.waitForFunction(async () => {
+      const storage = await import('/src/storage.js');
+      return (await storage.all('drafts')).some((draft) => draft.entry.body.includes('4567'));
+    });
+    await context.setOffline(true);
+    await page.reload();
+    await expect(page.locator('#entry-body')).toHaveValue('네트워크 없이 기억한 숫자 4567');
+    await page.locator('#entry-body').fill('네트워크 없이 기억한 숫자 4567 · 이어쓰기');
+    await page.locator('#save').click();
+    await expect(page.locator('#save-state')).toContainText('동기화 대기');
+    await page.reload();
+    await expect(page.locator('#entry-body')).toHaveValue(/이어쓰기/);
+    await context.setOffline(false);
   });
-  await context.setOffline(true);
-  await page.reload();
-  await expect(page.locator('#entry-body')).toHaveValue('네트워크 없이 기억한 숫자 4567');
-  await page.locator('#entry-body').fill('네트워크 없이 기억한 숫자 4567 · 이어쓰기');
-  await page.locator('#save').click();
-  await expect(page.locator('#save-state')).toContainText('동기화 대기');
-  await page.reload();
-  await expect(page.locator('#entry-body')).toHaveValue(/이어쓰기/);
-  await context.setOffline(false);
 });
