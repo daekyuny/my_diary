@@ -242,6 +242,7 @@ function renderList() {
   if (tags.includes(filter.tag)) $('#tag-filter').value = filter.tag;
   const shown = renderCalendar(filterGroups(groups, filter));
   $('#entry-count').textContent = groups.length;
+  $('#mobile-entry-count').textContent = groups.length;
   $('#result-count').textContent = shown.length;
   $('#entries').innerHTML = shown.length
     ? shown
@@ -1016,8 +1017,21 @@ function bind() {
     $('#filter-to').value = '';
     renderList();
   };
-  $('#show-journal').onclick = $('#back-list').onclick = () => {
+  $('#back-list').onclick = () => {
     document.body.classList.add('list-mode');
+  };
+  $('#show-journal').onclick = $('#mobile-show-list').onclick = () => {
+    $('#search').value = '';
+    $('#tag-filter').value = '';
+    $('#filter-from').value = '';
+    $('#filter-to').value = '';
+    $('#journal-view').value = 'list';
+    calendarDay = '';
+    renderList();
+    document.body.classList.add('list-mode');
+  };
+  $('#mobile-show-entry').onclick = () => {
+    document.body.classList.remove('list-mode');
   };
   $('#connect-google').onclick = $('#banner-connect').onclick = () => {
     if (!settings.googleClientId) settingsDialog();
@@ -1255,8 +1269,17 @@ async function start() {
   await recoverDrafts();
   await refreshGroups();
   const requested = new URLSearchParams(location.search).get('date');
-  const date = validDate(requested) ? requested : localDate();
+  const latest = filterGroups(groups)[0]?.latest.entry;
+  const todayEntry = groups.find((group) => group.latest.entry.date === localDate());
+  const date = validDate(requested)
+    ? requested
+    : todayEntry
+      ? localDate()
+      : latest?.date || localDate();
+  calendarMonth = date.slice(0, 7);
   await openEntry(null, date);
+  if (!validDate(requested) && groups.length && matchMedia('(max-width: 640px)').matches)
+    document.body.classList.add('list-mode');
   const drafts = await store.all('drafts');
   const draft = drafts.find((draft) => draft.entry.date === date);
   if (draft) {

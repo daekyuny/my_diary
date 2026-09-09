@@ -1312,3 +1312,32 @@ dialog::backdrop {
     min-height: 35px;
   }
 }
+
+.mobile-navigation {
+  display: none;
+}
+@media (max-width: 640px) {
+  .mobile-navigation {
+    display: flex;
+    gap: 8px;
+    padding: 0 16px 14px;
+  }
+  .mobile-navigation button {
+    flex: 1;
+    font-size: 14px;
+    min-height: 44px;
+  }
+  #mobile-entry-count {
+    margin-left: 5px;
+    font-size: 12px;
+    background: #e5eddc;
+    padding: 2px 7px;
+    border-radius: 10px;
+  }
+  body.list-mode #mobile-show-list,
+  body:not(.list-mode) #mobile-show-entry {
+    border-color: #648554;
+    color: #365d3e;
+    background: #edf2e5;
+  }
+}
