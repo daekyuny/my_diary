@@ -109,3 +109,30 @@ test('invalid backup metadata is rejected before it can break rendering', () => 
     makeRevision({ ...revision.entry, weather: { date: '2026-09-09', location: null } }),
   );
 });
+
+test('calendar refresh preserves manual rows and edits and respects removed events', () => {
+  const original = {
+    key: 'work:1',
+    title: 'Remote title',
+    start: '2026-09-09T01:00:00Z',
+    note: 'My note',
+    remind: false,
+    overrides: { title: 'My title', start: '2026-09-09T02:00:00Z' },
+  };
+  const manual = { key: 'manual:1', title: 'My appointment', note: '', manual: true };
+  const result = mergeEvents(
+    [original, manual],
+    [
+      { key: 'work:1', title: 'New remote title', start: '2026-09-09T03:00:00Z' },
+      { key: 'work:2', title: 'Deleted appointment', note: '' },
+    ],
+    ['work:2'],
+  );
+  assert.equal(result.length, 2);
+  assert.equal(result[0].title, 'My title');
+  assert.equal(result[0].start, '2026-09-09T02:00:00Z');
+  assert.equal(result[0].note, 'My note');
+  assert.equal(result[0].remind, false);
+  assert.deepEqual(result[1], manual);
+  assert.equal(mergeEvents(result, [{ key: 'work:2', title: 'Restored', note: '' }]).length, 3);
+});

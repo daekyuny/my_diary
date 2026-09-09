@@ -75,6 +75,16 @@
                 aria-label="일기 검색"
               /><kbd>⌘ K</kbd></label
             >
+            <div class="view-controls">
+              <label
+                >보기
+                <select id="journal-view" aria-label="기록 보기">
+                  <option value="list">목록</option>
+                  <option value="calendar">월간 캘린더</option>
+                </select></label
+              ><button id="manage-tags" class="text-button">태그 관리</button>
+            </div>
+            <div id="journal-calendar" hidden></div>
             <div class="filter-line">
               <select id="tag-filter" aria-label="태그 필터">
                 <option value="">모든 태그</option></select
@@ -101,20 +111,22 @@
               ><label class="date-control"
                 ><span>▦</span><input id="entry-date" type="date" aria-label="일기 날짜" /></label
               ><span id="save-state" role="status">아직 작성 전</span
-              ><button id="save" class="primary">저장하기 <span>↗</span></button>
+              ><button id="edit-entry" class="primary">편집</button
+              ><button id="save" class="primary" hidden>편집 완료</button>
             </div>
             <div id="conflict" class="conflict" hidden></div>
-            <fieldset id="editor-fields" class="editor-fields" disabled>
-              <div class="paper-heading">
-                <span id="entry-weekday" class="eyebrow"></span>
-                <h2 id="entry-heading"></h2>
-                <p>오늘의 작은 순간을 오래 기억할 수 있도록.</p>
-              </div>
+            <div class="paper-heading diary-heading">
+              <span id="entry-weekday" class="eyebrow"></span>
+              <h2 id="entry-heading"></h2>
+              <p>오늘의 작은 순간을 오래 기억할 수 있도록.</p>
+            </div>
+            <section id="preview" class="preview" aria-label="일기 미리보기"></section>
+            <fieldset id="editor-fields" class="editor-fields" disabled hidden>
               <div class="context-row">
                 <button id="weather-button" class="context-chip">
                   ☀ <span>그날의 날씨 추가</span> ＋</button
                 ><button id="calendar-button" class="context-chip">
-                  ▦ <span>일정 가져오기</span> ＋
+                  ▦ <span>일정 다시 가져오기</span> ＋
                 </button>
               </div>
               <div id="weather-card" hidden></div>
@@ -132,21 +144,36 @@
                 spellcheck="false"
               ></textarea>
               <div id="image-gallery" class="image-gallery"></div>
-              <div id="event-cards" class="event-cards"></div>
+              <section id="schedule-template">
+                <div class="section-toolbar">
+                  <h3>하루 일정</h3>
+                  <button id="add-event" class="text-button" type="button">＋ 일정 추가</button
+                  ><button id="remove-template" class="text-button" type="button">
+                    일정 양식 숨기기
+                  </button>
+                </div>
+                <div id="event-cards" class="event-cards"></div>
+              </section>
+              <button id="restore-template" type="button" class="button" hidden>
+                일정 양식 다시 넣기
+              </button>
               <div class="editor-bottom">
+                <div id="entry-tag-chips" class="tag-chips"></div>
                 <label class="tag-input"
                   ><span>＃</span
                   ><input
                     id="entry-tags"
                     placeholder="태그 추가 (쉼표로 구분)"
                     aria-label="일기 태그"
-                /></label>
+                    list="tag-suggestions" /></label
+                ><datalist id="tag-suggestions"></datalist>
                 <div class="attachment-tools">
                   <button id="add-image" class="text-button" type="button">▧ 사진·그림</button
-                  ><button id="toggle-preview" class="text-button" type="button">미리보기</button>
+                  ><button id="toggle-preview" class="text-button" type="button">
+                    편집 완료 · 미리보기
+                  </button>
                 </div>
               </div>
-              <div id="preview" class="preview" hidden></div>
             </fieldset>
             <footer class="editor-footer">
               <span id="word-count">0자</span
@@ -170,6 +197,14 @@
         <button id="close-dialog" class="icon-button" aria-label="닫기">×</button>
       </div>
       <div id="dialog-body"></div>
+    </dialog>
+    <dialog id="photo-dialog" class="photo-dialog">
+      <div class="dialog-head">
+        <h2 id="photo-title">원본 사진</h2>
+        <button id="close-photo" class="icon-button" aria-label="원본 사진 닫기">×</button>
+      </div>
+      <a id="original-photo-link" target="_blank" rel="noopener">원본 새 창에서 보기</a
+      ><img id="original-photo" alt="" />
     </dialog>
     <div id="toast" class="toast" role="status" hidden></div>
     <noscript>이 일기장은 JavaScript가 필요합니다. 브라우저 설정에서 허용해주세요.</noscript>

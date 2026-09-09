@@ -155,13 +155,23 @@ export function filterGroups(
     );
 }
 
-export function mergeEvents(existing, incoming) {
-  const next = new Map(incoming.map((event) => [event.key, event]));
+export function mergeEvents(existing, incoming, removedKeys = []) {
+  const next = new Map(
+    incoming.filter((event) => !removedKeys.includes(event.key)).map((event) => [event.key, event]),
+  );
   const result = existing.map((event) => {
+    if (event.manual) return event;
     if (!next.has(event.key)) return { ...event, missing: true };
     const update = next.get(event.key);
     next.delete(event.key);
-    return { ...event, ...update, note: event.note, remind: event.remind, missing: false };
+    return {
+      ...event,
+      ...update,
+      ...event.overrides,
+      note: event.note,
+      remind: event.remind,
+      missing: false,
+    };
   });
   return [...result, ...next.values()];
 }
@@ -210,7 +220,7 @@ export function markdown(entry) {
       `> 날씨: ${entry.weather.label} · ${entry.weather.min}–${entry.weather.max}°C · ${entry.weather.location.name}`,
       `> ${entry.weather.kind} · Open-Meteo (https://open-meteo.com/) · ${entry.weather.date}`,
     );
-  for (const event of entry.events)
+  for (const event of entry.calendarTemplate === false ? [] : entry.events)
     lines.push(
       '',
       `## ${event.title} (예정된 일정)`,

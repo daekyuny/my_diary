@@ -1,3 +1,4 @@
+import { edit } from './helpers.js';
 import { test, expect } from '@playwright/test';
 import { makeRevision, parseRevision, revisionFile } from '../../src/model.js';
 
@@ -115,15 +116,20 @@ test('failed Drive upload remains pending, retries, and concurrent edits retain 
   const state = await mockGoogle(page);
   await page.locator('#banner-connect').click();
   await expect(page.locator('#drive-status')).toContainText('연결됨');
+  await edit(page);
   await page.locator('#entry-title').fill('드라이브 저장 검증');
+  await edit(page);
   await page.locator('#entry-body').fill('첫 번째 원본');
+  await edit(page);
   await page.locator('#save').click();
   await expect(page.locator('#save-state')).toContainText('드라이브 저장 완료');
   expect(state.files).toHaveLength(1);
   const base = parseRevision(state.files[0].content);
 
   state.failUpload = true;
+  await edit(page);
   await page.locator('#entry-body').fill('폰에서 수정한 내용 12345');
+  await edit(page);
   await page.locator('#save').click();
   await expect(page.locator('#toast')).toContainText('503');
   await expect(page.locator('#save-state')).toContainText('동기화 대기');
@@ -155,17 +161,21 @@ test('unchanged saves and syncs reuse the Drive file while edits preserve revisi
   const state = await mockGoogle(page);
   await page.locator('#banner-connect').click();
   await expect(page.locator('#drive-status')).toContainText('연결됨');
+  await edit(page);
   await page.locator('#entry-body').fill('첫 번째 기록');
+  await edit(page);
   await page.locator('#save').click();
   await expect(page.locator('#save-state')).toContainText('드라이브 저장 완료');
   expect(state.files).toHaveLength(1);
   const first = parseRevision(state.files[0].content);
 
+  await edit(page);
   await page.locator('#save').click();
   await page.locator('#sync').click();
   await expect(page.locator('#save-state')).toContainText('드라이브 저장 완료');
   expect(state.files).toHaveLength(1);
 
+  await edit(page);
   await page.locator('#entry-body').fill('수정한 기록');
   await expect.poll(() => state.files.length).toBe(2);
   await expect(page.locator('#save-state')).toContainText('드라이브 저장 완료');
@@ -175,6 +185,7 @@ test('unchanged saves and syncs reuse the Drive file while edits preserve revisi
   expect(state.files[1].name).not.toBe(state.files[0].name);
   expect(parseRevision(state.files[0].content).entry.body).toBe('첫 번째 기록');
 
+  await edit(page);
   await page.locator('#save').click();
   await page.locator('#sync').click();
   await expect(page.locator('#save-state')).toContainText('드라이브 저장 완료');
@@ -185,18 +196,21 @@ test('calendar imports once, refreshes title, and preserves notes after cancella
   page,
 }) => {
   const state = await mockGoogle(page);
-  await page.locator('#calendar-button').click();
+  await page.locator('#preview-calendar').click();
   await page.locator('#authorize-calendar').click();
   await expect(page.locator('#dialog-title')).toHaveText('가져올 캘린더');
   await page.locator('input[name="calendar"]').check();
   await page.locator('#save-calendars').click();
   await expect(page.locator('.event-card')).toHaveCount(1);
+  await edit(page);
   await page.locator('[data-event-note="0"]').fill('김민수 · 계약 번호 9876');
   await page.locator('[data-event-reminder="0"]').uncheck();
+  await edit(page);
   await page.locator('#save').click();
   state.calendarTitle = '변경된 회의';
-  await page.locator('#calendar-button').click();
-  await expect(page.locator('.event-card')).toContainText('변경된 회의');
+  await page.locator('#preview-calendar').click();
+  await edit(page);
+  await expect(page.locator('[data-event-field=title]')).toHaveValue('변경된 회의');
   await expect(page.locator('[data-event-note="0"]')).toHaveValue('김민수 · 계약 번호 9876');
   await expect(page.locator('[data-event-reminder="0"]')).not.toBeChecked();
   state.calendarVisible = false;
@@ -207,7 +221,9 @@ test('calendar imports once, refreshes title, and preserves notes after cancella
 
 test('local drafts enter an account only through explicit migration', async ({ page }) => {
   await mockGoogle(page);
+  await edit(page);
   await page.locator('#entry-body').fill('연결 전 개인 초안');
+  await edit(page);
   await page.locator('#save').click();
   await page.locator('#banner-connect').click();
   await expect(page.locator('#entry-body')).toHaveValue('');
@@ -216,4 +232,35 @@ test('local drafts enter an account only through explicit migration', async ({ p
   await expect(page.locator('#toast')).toContainText('가져왔습니다');
   await page.locator('#new-entry').click();
   await expect(page.locator('#entry-body')).toHaveValue('연결 전 개인 초안');
+});
+
+test('deleted Google events stay deleted on navigation and explicit reimport restores them', async ({
+  page,
+}) => {
+  await mockGoogle(page);
+  await page.locator('#entry-date').fill('2026-08-07');
+  await page.locator('#preview-calendar').click();
+  await page.locator('#authorize-calendar').click();
+  await page.locator('input[name=calendar]').check();
+  await page.locator('#save-calendars').click();
+  await expect(page.locator('.preview-event')).toHaveCount(1);
+  await expect(page.locator('#entry-date')).toHaveValue('2026-08-07');
+  await edit(page);
+  await page.locator('[data-event-field=title]').fill('내가 바꾼 일정');
+  await page.locator('[data-event-note="0"]').fill('삭제 전 기록');
+  await edit(page);
+  await page.locator('#save').click();
+  await page.locator('#preview-calendar').click();
+  await expect(page.locator('.preview-event')).toContainText('내가 바꾼 일정');
+  await edit(page);
+  await page.locator('[data-remove-event="0"]').click();
+  await edit(page);
+  await page.locator('#save').click();
+  await expect(page.locator('.preview-event')).toHaveCount(0);
+  await page.locator('#sync').click();
+  await expect(page.locator('#toast')).toContainText('동기화를 완료');
+  await expect(page.locator('.preview-event')).toHaveCount(0);
+  await page.locator('#preview-calendar').click();
+  await expect(page.locator('.preview-event')).toHaveCount(1);
+  await expect(page.locator('.preview-event')).toContainText('프로젝트 회의');
 });

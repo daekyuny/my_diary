@@ -30,3 +30,7 @@ test-results/
 .wrangler/
 .dev.vars
 config.local.json
+
+# Personal migration archives (never publish with the app)
+/keep-data.zip
+/imports/

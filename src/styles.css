@@ -1067,3 +1067,248 @@ dialog::backdrop {
     transition: background 0.15s ease;
   }
 }
+
+/* Reading and editing use the same paper, one mode at a time. */
+.diary-heading {
+  padding: 32px 43px 12px;
+}
+.editor-fields {
+  padding-top: 8px;
+}
+.preview {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 8px 43px 35px;
+  flex: 1;
+  white-space: normal;
+  font-size: 15px;
+}
+.preview-title {
+  font-size: 23px;
+  margin: 16px 0;
+}
+.preview-body {
+  white-space: pre-wrap;
+  line-height: 2;
+  margin: 22px 0;
+  min-height: 130px;
+}
+.preview-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 16px;
+  padding: 4px 10px;
+  background: #edf2e4;
+  color: #567047;
+  font-size: 12px;
+  min-height: 30px;
+  overflow-wrap: anywhere;
+}
+.editor-bottom {
+  flex-wrap: wrap;
+}
+.editor-bottom > .tag-chips {
+  width: 100%;
+}
+.preview-photos {
+  grid-template-columns: repeat(auto-fill, minmax(110px, 150px));
+}
+.photo-thumbnail {
+  padding: 0;
+  border-radius: 9px;
+  overflow: hidden;
+  background: #edf0e7;
+  border: 1px solid var(--line);
+  min-height: 100px;
+}
+.preview .photo-thumbnail img {
+  width: 100%;
+  height: 115px;
+  object-fit: cover;
+  margin: 0;
+  display: block;
+}
+.image-tile img {
+  cursor: zoom-in;
+}
+.photo-dialog {
+  width: min(1100px, calc(100% - 24px));
+}
+.photo-dialog img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 16px auto 0;
+}
+.photo-dialog a {
+  font-size: 13px;
+  color: var(--green);
+}
+.preview-events {
+  border-top: 1px solid var(--line);
+  margin-top: 26px;
+}
+.preview-events:empty {
+  display: none;
+}
+.preview-event {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr);
+  gap: 20px;
+  padding: 17px 0;
+  border-bottom: 1px solid var(--line);
+}
+.preview-event time {
+  color: #718064;
+  font-size: 12px;
+  padding-top: 3px;
+}
+.preview-event strong {
+  font-size: 14px;
+}
+.preview-event p {
+  white-space: pre-wrap;
+  margin: 8px 0 0;
+}
+.section-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 22px;
+}
+.section-toolbar h3 {
+  font-size: 15px;
+  margin-right: auto;
+}
+.event-card .event-label {
+  display: block;
+  font-size: 11px;
+  margin-top: 12px;
+}
+.event-label input {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #dfe5d5;
+  background: var(--paper);
+  border-radius: 6px;
+  margin-top: 5px;
+  font-size: 14px;
+}
+.event-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+.event-times label {
+  flex-wrap: wrap;
+}
+.event-times input[type='time'] {
+  padding: 8px;
+  border: 1px solid #dfe5d5;
+  border-radius: 6px;
+  background: var(--paper);
+}
+.view-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 14px;
+  gap: 5px;
+}
+.view-controls label {
+  font-size: 11px;
+}
+.view-controls select {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 4px;
+}
+.month-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 0 8px;
+}
+.month-navigation input {
+  width: 140px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+}
+.month-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+.weekday {
+  text-align: center;
+  font-size: 10px;
+  color: var(--muted);
+  padding: 7px 0;
+}
+.calendar-day {
+  min-height: 40px;
+  border-radius: 6px;
+  padding: 4px 0;
+  font-size: 11px;
+  border: 1px solid transparent;
+}
+.calendar-day small {
+  display: block;
+  font-size: 8px;
+  color: #618050;
+}
+.calendar-day.today {
+  border-color: #a9bc99;
+}
+.calendar-day.selected {
+  background: var(--green);
+  color: white;
+}
+.calendar-day.selected small {
+  color: white;
+}
+@media (max-width: 1100px) {
+  .diary-heading,
+  .preview {
+    padding-left: 25px;
+    padding-right: 25px;
+  }
+}
+@media (max-width: 640px) {
+  .diary-heading,
+  .preview {
+    padding-left: 22px;
+    padding-right: 22px;
+  }
+  .preview-title {
+    font-size: 22px;
+  }
+  .preview-event {
+    grid-template-columns: 84px minmax(0, 1fr);
+    gap: 12px;
+  }
+  .event-label input,
+  .event-times input[type='time'] {
+    font-size: 16px;
+  }
+  #edit-entry {
+    padding: 8px 14px;
+    min-height: 35px;
+  }
+}

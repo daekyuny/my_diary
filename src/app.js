@@ -10,7 +10,7 @@ import {
 } from './model.js';
 import * as store from './storage.js';
 import * as google from './google.js';
-import { syncDrive, assetBlob } from './sync.js';
+import { syncDrive as syncDriveRemote, assetBlob } from './sync.js';
 import { findLocations, currentLocation, fetchWeather } from './weather.js';
 import { exportBackup, importBackup } from './backup.js';
 import { enablePush, disablePush, syncReminders, testPush } from './notifications.js';
@@ -36,6 +36,11 @@ let cloudTimer;
 let initialized = false;
 let activeRevisionId = '';
 let reminderDirty = false;
+let editing = false;
+let calendarMonth = localDate().slice(0, 7);
+let calendarDay = '';
+let previewUrls = [];
+let renderGeneration = 0;
 
 function toast(message, error = false) {
   clearTimeout(toastTimer);
@@ -54,7 +59,15 @@ async function task(fn) {
   if (busy) return;
   busy = true;
   $('#editor-fields').disabled = true;
-  for (const id of ['save', 'sync', 'entry-date', 'connect-google', 'banner-connect', 'new-entry'])
+  for (const id of [
+    'save',
+    'edit-entry',
+    'sync',
+    'entry-date',
+    'connect-google',
+    'banner-connect',
+    'new-entry',
+  ])
     $(`#${id}`).disabled = true;
   try {
     await fn();
@@ -66,6 +79,7 @@ async function task(fn) {
     $('#editor-fields').disabled = false;
     for (const id of [
       'save',
+      'edit-entry',
       'sync',
       'entry-date',
       'connect-google',
@@ -116,8 +130,89 @@ function updateSaveState(message) {
 
 async function refreshGroups() {
   groups = entryGroups(await store.all('revisions'));
+  let migrated = 0;
+  for (const group of groups) {
+    for (const revision of group.heads) {
+      if (
+        revision.entry.source?.format !== 'google-keep' ||
+        revision.entry.source.keepTagRemoved ||
+        !revision.entry.tags.includes('My Diary')
+      )
+        continue;
+      const updated = structuredClone(revision.entry);
+      updated.tags = updated.tags.filter((tag) => tag !== 'My Diary');
+      updated.source.keepTagRemoved = true;
+      const next = makeRevision(updated, [revision.id]);
+      next.id = `untag-${revision.id}`;
+      await store.put('revisions', next);
+      if (entry.id === updated.id && !dirty && activeRevisionId === revision.id) {
+        entry = updated;
+        parentIds = [next.id];
+        activeRevisionId = next.id;
+      }
+      migrated++;
+    }
+  }
+  if (migrated) groups = entryGroups(await store.all('revisions'));
   renderList();
   updateSaveState();
+  return migrated;
+}
+
+async function syncDrive(progress) {
+  await syncDriveRemote(progress);
+  if (await refreshGroups()) await syncDriveRemote(progress);
+}
+
+async function setEditing(value) {
+  editing = value;
+  $('#editor-fields').hidden = !editing;
+  $('#preview').hidden = editing;
+  $('#save').hidden = !editing;
+  $('#edit-entry').hidden = editing;
+  $('#editor').setAttribute('aria-label', editing ? '일기 작성' : '일기 미리보기');
+  if (!editing) await renderPreview();
+}
+
+function renderTagChips() {
+  $('#entry-tag-chips').innerHTML = entry.tags
+    .map(
+      (tag, index) =>
+        `<button type="button" class="tag-chip" data-remove-tag="${index}" aria-label="${escape(tag)} 태그 제거">#${escape(tag)} ×</button>`,
+    )
+    .join('');
+  $('#tag-suggestions').innerHTML = [...new Set(groups.flatMap((group) => group.latest.entry.tags))]
+    .sort()
+    .map((tag) => `<option value="${escape(tag)}"></option>`)
+    .join('');
+}
+
+function renderCalendar(shown) {
+  const enabled = $('#journal-view').value === 'calendar';
+  $('#journal-calendar').hidden = !enabled;
+  if (!enabled) return shown;
+  const [year, month] = calendarMonth.split('-').map(Number);
+  const offset = new Date(year, month - 1, 1).getDay();
+  const length = new Date(year, month, 0).getDate();
+  const counts = new Map();
+  for (const group of shown)
+    counts.set(group.latest.entry.date, (counts.get(group.latest.entry.date) || 0) + 1);
+  $('#journal-calendar').innerHTML =
+    `<div class="month-navigation"><button data-month-step="-1" aria-label="이전 달">‹</button><label><span class="sr-only">캘린더 월</span><input id="calendar-month" type="month" value="${calendarMonth}" /></label><button data-month-step="1" aria-label="다음 달">›</button></div><div class="month-grid">${['일', '월', '화', '수', '목', '금', '토'].map((day) => `<span class="weekday">${day}</span>`).join('')}${'<span></span>'.repeat(offset)}${Array.from(
+      { length },
+      (_, index) => {
+        const date = `${calendarMonth}-${String(index + 1).padStart(2, '0')}`;
+        const count = counts.get(date) || 0;
+        return `<button class="calendar-day ${calendarDay === date ? 'selected' : ''} ${date === localDate() ? 'today' : ''}" data-calendar-date="${date}" aria-label="${date}, 일기 ${count}개" aria-pressed="${calendarDay === date}"><span>${index + 1}</span>${count ? `<small>${count}개</small>` : ''}</button>`;
+      },
+    ).join(
+      '',
+    )}</div><button id="calendar-show-month" class="text-button">${calendarDay ? '선택 해제 · ' : ''}이번 달 전체 기록</button>`;
+  return shown.filter((group) =>
+    calendarDay
+      ? group.latest.entry.date === calendarDay
+      : group.latest.entry.date.startsWith(calendarMonth),
+  );
 }
 
 async function recoverDrafts() {
@@ -129,6 +224,10 @@ async function recoverDrafts() {
 }
 
 function renderList() {
+  if (!$('#journal-view').dataset.ready) {
+    $('#journal-view').value = settings.journalView || 'list';
+    $('#journal-view').dataset.ready = 'true';
+  }
   const filter = {
     query: $('#search').value,
     tag: $('#tag-filter').value,
@@ -141,7 +240,7 @@ function renderList() {
     '<option value="">모든 태그</option>' +
     tags.map((tag) => `<option value="${escape(tag)}">${escape(tag)}</option>`).join('');
   if (tags.includes(filter.tag)) $('#tag-filter').value = filter.tag;
-  const shown = filterGroups(groups, filter);
+  const shown = renderCalendar(filterGroups(groups, filter));
   $('#entry-count').textContent = groups.length;
   $('#result-count').textContent = shown.length;
   $('#entries').innerHTML = shown.length
@@ -186,6 +285,9 @@ async function renderEditor() {
   $('#entry-title').value = entry.title;
   $('#entry-body').value = entry.body;
   $('#entry-tags').value = entry.tags.join(', ');
+  renderTagChips();
+  $('#schedule-template').hidden = entry.calendarTemplate === false;
+  $('#restore-template').hidden = entry.calendarTemplate !== false;
   $('#word-count').textContent = `${entry.body.length.toLocaleString()}자`;
   $('#weather-card').hidden = !entry.weather;
   if (entry.weather) {
@@ -198,12 +300,18 @@ async function renderEditor() {
       renderEditor();
     };
   }
-  $('#event-cards').innerHTML = entry.events
-    .map(
-      (event, index) =>
-        `<article class="event-card"><header><div><small>▦ 예정된 일정${event.missing ? ' · 원본 변경/삭제 또는 조회 범위에서 제외됨' : ''}</small><h3>${escape(event.title)}</h3><small>${event.allDay ? '종일' : `${formatTime(event.start)} – ${formatTime(event.end)}`}${event.location ? ` · ${escape(event.location)}` : ''}</small></div><label><input type="checkbox" data-event-reminder="${index}" ${event.remind ? 'checked' : ''} ${event.allDay || event.missing ? 'disabled' : ''} />종료 알림</label></header><textarea data-event-note="${index}" aria-label="${escape(event.title)} 기록" placeholder="실제로 있었던 일, 기억하고 싶은 내용을 남겨보세요.">${escape(event.note)}</textarea></article>`,
-    )
-    .join('');
+  $('#event-cards').innerHTML =
+    entry.events
+      .map(
+        (event, index) => `<article class="event-card">
+    <header><small>${event.manual ? '직접 추가한 일정' : 'Google 캘린더 일정'}${event.missing ? ' · 원본 변경/삭제' : ''}</small><button type="button" class="text-button" data-remove-event="${index}">일정 삭제</button></header>
+    <label class="event-label">일정 제목<input data-event-field="title" data-event-index="${index}" value="${escape(event.title)}" aria-label="일정 ${index + 1} 제목" /></label>
+    <div class="event-times"><label>시작<input type="time" data-event-field="start" data-event-index="${index}" value="${event.allDay ? '' : timeValue(event.start)}" ${event.allDay ? 'disabled' : ''} /></label><label>종료<input type="time" data-event-field="end" data-event-index="${index}" value="${event.allDay ? '' : timeValue(event.end)}" ${event.allDay ? 'disabled' : ''} /></label><label><input type="checkbox" data-event-all-day="${index}" ${event.allDay ? 'checked' : ''} />종일</label></div>
+    <label class="event-label">장소<input data-event-field="location" data-event-index="${index}" value="${escape(event.location || '')}" /></label>
+    <textarea data-event-note="${index}" aria-label="${escape(event.title)} 기록" placeholder="일정별 내용을 자유롭게 기록하세요.">${escape(event.note)}</textarea>
+    <label><input type="checkbox" data-event-reminder="${index}" ${event.remind ? 'checked' : ''} ${event.allDay || event.missing || event.manual ? 'disabled' : ''} />종료 알림${event.manual ? ' (Google 일정만 지원)' : ''}</label></article>`,
+      )
+      .join('') || '<p class="dialog-copy">이 날짜의 일정을 가져오거나 직접 추가해 보세요.</p>';
   const group = groups.find((g) => g.latest.entry.id === entry.id);
   $('#conflict').hidden = !group || group.heads.length < 2;
   if (group?.heads.length > 1) {
@@ -229,7 +337,13 @@ async function renderEditor() {
         const img = document.createElement('img');
         img.src = url;
         img.alt = image.name;
-        placeholder.replaceWith(img);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'photo-thumbnail';
+        button.dataset.openImage = image.id;
+        button.setAttribute('aria-label', `${image.name} 원본 보기`);
+        button.append(img);
+        placeholder.replaceWith(button);
       }
     } catch {
       const placeholder = $(`[data-image="${image.id}"] .image-placeholder`);
@@ -237,7 +351,7 @@ async function renderEditor() {
     }
   }
   updateSaveState();
-  if (!$('#preview').hidden) await renderPreview();
+  await setEditing(editing);
 }
 
 function formatTime(value) {
@@ -296,7 +410,7 @@ async function saveEntry(sync = false) {
   updateSaveState();
 }
 
-async function openEntry(id, date) {
+async function openEntry(id, date, edit = false) {
   await saveEntry(false);
   const group =
     groups.find((g) => g.latest.entry.id === id) ||
@@ -311,14 +425,17 @@ async function openEntry(id, date) {
     dirty = true;
   }
   document.body.classList.remove('list-mode');
-  $('#preview').hidden = true;
+  editing = edit;
   renderList();
   await renderEditor();
   history.replaceState(null, '', `?date=${entry.date}`);
-  if (google.hasCalendar() && settings.calendarIds?.length) await importCalendarDay();
+  if (entry.calendarTemplate !== false && google.hasCalendar() && settings.calendarIds?.length)
+    await importCalendarDay();
 }
 
 async function connect(calendar = false) {
+  const selectedDate = entry.date;
+  const selectedId = account ? entry.id : null;
   // authorize must be called directly from a click to preserve the iOS popup gesture.
   const authorization = google.authorize(calendar);
   await task(async () => {
@@ -343,7 +460,7 @@ async function connect(calendar = false) {
     }
     await syncDrive(updateSaveState);
     await refreshGroups();
-    await openEntry(null, localDate());
+    await openEntry(selectedId, selectedDate);
     if (calendar) {
       calendarList = await google.calendars();
       showCalendarDialog();
@@ -519,12 +636,12 @@ function showCalendarDialog() {
       );
       persistSettings();
       closeDialog();
-      await importCalendarDay();
+      await importCalendarDay(true);
       await updateReminderSchedule();
     });
 }
 
-async function importCalendarDay() {
+async function importCalendarDay(restore = false) {
   if (!google.hasCalendar() || !settings.calendarIds?.length) {
     openCalendarSettings();
     return;
@@ -535,10 +652,20 @@ async function importCalendarDay() {
   const incoming = (
     await Promise.all(settings.calendarIds.map((id) => google.events(id, from, to)))
   ).flat();
-  const merged = mergeEvents(entry.events, incoming);
+  if (restore) {
+    entry.calendarTemplate = true;
+    entry.removedEventKeys = [];
+    changed();
+  }
+  if (entry.calendarTemplate === false) return;
+  const merged = mergeEvents(entry.events, incoming, entry.removedEventKeys || []);
   if (JSON.stringify(merged) !== JSON.stringify(entry.events)) {
     entry.events = merged;
     changed();
+    await renderEditor();
+    await saveEntry(true);
+  }
+  if (restore) {
     await renderEditor();
     await saveEntry(true);
   }
@@ -608,7 +735,24 @@ async function updateReminderSchedule() {
         .flatMap((group) => group.latest.entry.events)
         .map((event) => [event.key, event.remind]),
     );
-    upcoming = upcoming.filter((event) => !event.allDay && overrides.get(event.key) !== false);
+    const removed = new Set(
+      groups.flatMap((group) => [
+        ...(group.latest.entry.removedEventKeys || []),
+        ...(group.latest.entry.calendarTemplate === false
+          ? group.latest.entry.events.map((event) => event.key)
+          : []),
+      ]),
+    );
+    const edits = new Map(
+      groups.flatMap((group) =>
+        group.latest.entry.events.map((event) => [event.key, event.overrides]),
+      ),
+    );
+    upcoming = upcoming
+      .map((event) => ({ ...event, ...edits.get(event.key) }))
+      .filter(
+        (event) => !event.allDay && !removed.has(event.key) && overrides.get(event.key) !== false,
+      );
   }
   await syncReminders(config, upcoming);
   config.lastSync = new Date().toISOString();
@@ -673,27 +817,134 @@ function compareVersions() {
     });
 }
 
+function timeValue(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? ''
+    : `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+async function showOriginal(image) {
+  const url = URL.createObjectURL(await assetBlob(image));
+  const viewer = $('#photo-dialog');
+  const previous = $('#original-photo').getAttribute('src');
+  if (previous) URL.revokeObjectURL(previous);
+  $('#original-photo').src = url;
+  $('#original-photo').alt = image.name;
+  $('#original-photo-link').href = url;
+  $('#photo-title').textContent = image.name;
+  if (!viewer.open) viewer.showModal();
+}
+
 async function renderPreview() {
+  const generation = ++renderGeneration;
+  for (const url of previewUrls) URL.revokeObjectURL(url);
+  previewUrls = [];
+  const snapshot = structuredClone(entry);
   const container = $('#preview');
-  container.replaceChildren();
-  // Text-only rendering prevents HTML/script injection from diary, calendar, and imported files.
-  const parts = entry.body.split(/(!\[[^\]]*\]\(diary-image:[\w-]+\))/g);
-  for (const part of parts) {
-    const match = /^!\[([^\]]*)\]\(diary-image:([\w-]+)\)$/.exec(part);
-    const image = match && entry.images.find((image) => image.id === match[2]);
-    if (image) {
-      try {
-        const url = URL.createObjectURL(await assetBlob(image));
-        objectUrls.push(url);
-        const img = document.createElement('img');
-        img.src = url;
-        img.alt = match[1];
-        container.append(img);
-      } catch {
-        container.append(document.createTextNode('[사진: Google 재연결 필요]'));
-      }
-    } else container.append(document.createTextNode(part));
+  container.innerHTML = `<div class="preview-actions"><button id="preview-calendar" class="text-button">↻ 일정 다시 가져오기</button></div><h3 class="preview-title"></h3><div class="preview-tags tag-chips"></div><div class="preview-weather"></div><div class="preview-body"></div><div class="preview-photos image-gallery"></div><div class="preview-events"></div>`;
+  $('#preview-calendar').onclick = () => {
+    if (!google.hasCalendar() || !settings.calendarIds?.length) openCalendarSettings();
+    else task(() => importCalendarDay(true));
+  };
+  $('.preview-title').textContent = snapshot.title || '오늘의 기록';
+  $('.preview-tags').innerHTML = snapshot.tags
+    .map((tag) => `<span class="tag-chip">#${escape(tag)}</span>`)
+    .join('');
+  if (snapshot.weather) {
+    const w = snapshot.weather;
+    $('.preview-weather').innerHTML =
+      `<div class="weather-detail">${escape(w.label)} · ${escape(w.min)}–${escape(w.max)}°C · ${escape(w.location.name)}<br /><small>${escape(w.date)} · ${escape(w.kind)} · <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a></small></div>`;
   }
+  // All user content is rendered as text. Inline images join the thumbnail gallery.
+  $('.preview-body').textContent =
+    snapshot.body.replace(/!\[[^\]]*\]\(diary-image:[\w-]+\)/g, '').trim() ||
+    (snapshot.events.length || snapshot.images.length
+      ? ''
+      : '아직 기록이 없습니다. 편집을 눌러 오늘의 이야기를 남겨보세요.');
+  if (snapshot.calendarTemplate !== false)
+    $('.preview-events').innerHTML = snapshot.events
+      .map(
+        (event) =>
+          `<article class="preview-event"><time>${event.allDay ? '종일' : `${escape(formatTime(event.start))} – ${escape(formatTime(event.end))}`}</time><div><strong>${escape(event.title)}</strong>${event.note ? `<p>${escape(event.note)}</p>` : ''}</div></article>`,
+      )
+      .join('');
+  for (const image of snapshot.images) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'photo-thumbnail';
+    button.setAttribute('aria-label', `${image.name} 원본 보기`);
+    button.textContent = '사진 불러오는 중…';
+    $('.preview-photos').append(button);
+    try {
+      const blob = await assetBlob(image);
+      if (generation !== renderGeneration) return;
+      const url = URL.createObjectURL(blob);
+      previewUrls.push(url);
+      const img = document.createElement('img');
+      img.src = url;
+      img.alt = image.name;
+      button.replaceChildren(img);
+      button.onclick = () => task(() => showOriginal(image));
+    } catch {
+      button.textContent = '사진: Google 재연결 필요';
+    }
+  }
+}
+
+function tagsDialog() {
+  const tags = [
+    ...new Set(groups.flatMap((group) => group.heads.flatMap((revision) => revision.entry.tags))),
+  ].sort();
+  dialog(
+    '태그 관리',
+    `<p class="dialog-copy">태그 이름을 바꾸거나 모든 일기에서 제거합니다. 일기 본문과 이전 수정 이력은 보존됩니다. 새 태그는 일기 편집 화면에서 추가하세요.</p>${tags.length ? `<label class="form-field">태그 선택<select id="managed-tag">${tags.map((tag) => `<option value="${escape(tag)}">${escape(tag)}</option>`).join('')}</select></label><label class="form-field">새 이름<input id="renamed-tag" placeholder="바꿀 태그 이름" /></label><div class="dialog-actions"><button id="rename-tag" class="primary">이름 변경</button><button id="delete-tag" class="button">모든 일기에서 태그 제거</button></div>` : '<p>아직 태그가 없습니다.</p>'}`,
+  );
+  if (!tags.length) return;
+  const apply = (replacement) =>
+    task(async () => {
+      const tag = $('#managed-tag').value;
+      await saveEntry(false);
+      let count = 0;
+      for (const group of groups)
+        for (const revision of group.heads) {
+          if (!revision.entry.tags.includes(tag)) continue;
+          const updated = structuredClone(revision.entry);
+          updated.tags = [
+            ...new Set(
+              updated.tags.flatMap((value) =>
+                value === tag ? (replacement ? [replacement] : []) : [value],
+              ),
+            ),
+          ];
+          const next = makeRevision(updated, [revision.id]);
+          await store.put('revisions', next);
+          if (entry.id === updated.id && activeRevisionId === revision.id) {
+            entry = updated;
+            parentIds = [next.id];
+            activeRevisionId = next.id;
+          }
+          count++;
+        }
+      if ($('#tag-filter').value === tag) $('#tag-filter').value = '';
+      await refreshGroups();
+      if (google.connected()) {
+        await syncDrive(updateSaveState);
+        await refreshGroups();
+      }
+      closeDialog();
+      await renderEditor();
+      toast(`${count}개 버전의 태그를 정리했습니다.`);
+    });
+  $('#delete-tag').onclick = () => apply('');
+  $('#rename-tag').onclick = () => {
+    const value = $('#renamed-tag').value.trim().replace(/^#/, '');
+    if (!value || value.includes(',')) {
+      toast('쉼표 없이 태그 이름 하나를 입력해주세요.', true);
+      return;
+    }
+    apply(value);
+  };
 }
 
 function bind() {
@@ -716,16 +967,20 @@ function bind() {
       ),
     ];
     changed();
+    renderTagChips();
   };
   $('#entry-date').onchange = () => {
     const date = $('#entry-date').value;
     if (validDate(date)) task(() => openEntry(null, date));
     else setHeading();
   };
+  $('#edit-entry').onclick = () => task(() => setEditing(true));
   $('#save').onclick = () =>
     task(async () => {
       await saveEntry(true);
       if (settings.notifications?.events) await updateReminderSchedule();
+      await renderEditor();
+      await setEditing(false);
       toast(
         google.connected()
           ? '드라이브에 저장했습니다.'
@@ -746,7 +1001,7 @@ function bind() {
       toast('동기화를 완료했습니다.');
     });
   };
-  $('#new-entry').onclick = () => task(() => openEntry(null, localDate()));
+  $('#new-entry').onclick = () => task(() => openEntry(null, localDate(), true));
   $('#entries').onclick = (event) => {
     const button = event.target.closest('[data-entry]');
     if (button) task(() => openEntry(button.dataset.entry));
@@ -772,7 +1027,7 @@ function bind() {
   $('#open-calendar').onclick = openCalendarSettings;
   $('#calendar-button').onclick = () => {
     if (!google.hasCalendar() || !settings.calendarIds?.length) openCalendarSettings();
-    else task(importCalendarDay);
+    else task(() => importCalendarDay(true));
   };
   $('#open-reminders').onclick = remindersDialog;
   $('#weather-button').onclick = weatherDialog;
@@ -806,6 +1061,12 @@ function bind() {
       await saveEntry(true);
     });
   $('#image-gallery').onclick = (event) => {
+    const thumbnail = event.target.closest('[data-open-image]');
+    if (thumbnail) {
+      const image = entry.images.find((image) => image.id === thumbnail.dataset.openImage);
+      task(() => showOriginal(image));
+      return;
+    }
     const insert = event.target.closest('[data-insert-image]');
     const remove = event.target.closest('[data-remove-image]');
     if (insert) {
@@ -835,17 +1096,129 @@ function bind() {
       entry.events[Number(event.target.dataset.eventNote)].note = event.target.value;
       changed();
     }
+    if (event.target.dataset.eventField) {
+      const item = entry.events[Number(event.target.dataset.eventIndex)];
+      const field = event.target.dataset.eventField;
+      let value = event.target.value;
+      if (field === 'start' || field === 'end') {
+        if (!value) return;
+        const previousDate = new Date(item[field]);
+        const day = Number.isNaN(previousDate.getTime()) ? entry.date : localDate(previousDate);
+        value = new Date(`${day}T${value}:00`).toISOString();
+      }
+      item[field] = value;
+      if (!item.manual) item.overrides = { ...item.overrides, [field]: value };
+      reminderDirty = true;
+      changed();
+    }
   };
   $('#event-cards').onchange = (event) => {
+    if (event.target.dataset.eventAllDay != null) {
+      const item = entry.events[Number(event.target.dataset.eventAllDay)];
+      item.allDay = event.target.checked;
+      item.start = item.allDay ? entry.date : new Date(`${entry.date}T09:00:00`).toISOString();
+      item.end = item.allDay ? entry.date : new Date(`${entry.date}T10:00:00`).toISOString();
+      if (!item.manual)
+        item.overrides = {
+          ...item.overrides,
+          allDay: item.allDay,
+          start: item.start,
+          end: item.end,
+        };
+      if (item.allDay) item.remind = false;
+      reminderDirty = true;
+      changed();
+      renderEditor();
+    }
     if (event.target.dataset.eventReminder != null) {
       entry.events[Number(event.target.dataset.eventReminder)].remind = event.target.checked;
       reminderDirty = true;
       changed();
     }
   };
-  $('#toggle-preview').onclick = () => {
-    $('#preview').hidden = !$('#preview').hidden;
-    if (!$('#preview').hidden) task(renderPreview);
+  $('#toggle-preview').onclick = () => $('#save').click();
+  $('#close-photo').onclick = () => $('#photo-dialog').close();
+  $('#photo-dialog').addEventListener('close', () => {
+    URL.revokeObjectURL($('#original-photo').src);
+    $('#original-photo').removeAttribute('src');
+    $('#original-photo-link').removeAttribute('href');
+  });
+  $('#entry-tag-chips').onclick = (event) => {
+    const button = event.target.closest('[data-remove-tag]');
+    if (!button) return;
+    entry.tags.splice(Number(button.dataset.removeTag), 1);
+    $('#entry-tags').value = entry.tags.join(', ');
+    renderTagChips();
+    changed();
+  };
+  $('#manage-tags').onclick = tagsDialog;
+  $('#journal-view').onchange = () => {
+    settings.journalView = $('#journal-view').value;
+    persistSettings();
+    calendarMonth = entry.date.slice(0, 7);
+    calendarDay = '';
+    renderList();
+  };
+  $('#journal-calendar').onchange = (event) => {
+    if (event.target.id === 'calendar-month' && /^\d{4}-\d{2}$/.test(event.target.value)) {
+      calendarMonth = event.target.value;
+      calendarDay = '';
+      renderList();
+    }
+  };
+  $('#journal-calendar').onclick = (event) => {
+    const day = event.target.closest('[data-calendar-date]');
+    const step = event.target.closest('[data-month-step]');
+    if (day) {
+      calendarDay = day.dataset.calendarDate;
+      task(() => openEntry(null, calendarDay));
+    } else if (step) {
+      const date = new Date(`${calendarMonth}-01T12:00:00`);
+      date.setMonth(date.getMonth() + Number(step.dataset.monthStep));
+      calendarMonth = localDate(date).slice(0, 7);
+      calendarDay = '';
+      renderList();
+    } else if (event.target.id === 'calendar-show-month') {
+      calendarDay = '';
+      renderList();
+    }
+  };
+  $('#add-event').onclick = () => {
+    entry.events.push({
+      key: `manual:${crypto.randomUUID()}`,
+      manual: true,
+      title: '새 일정',
+      note: '',
+      start: new Date(`${entry.date}T09:00:00`).toISOString(),
+      end: new Date(`${entry.date}T10:00:00`).toISOString(),
+      allDay: false,
+      location: '',
+      remind: false,
+    });
+    changed();
+    renderEditor();
+  };
+  $('#event-cards').onclick = (event) => {
+    const button = event.target.closest('[data-remove-event]');
+    if (!button) return;
+    const [removed] = entry.events.splice(Number(button.dataset.removeEvent), 1);
+    if (!removed.manual)
+      entry.removedEventKeys = [...new Set([...(entry.removedEventKeys || []), removed.key])];
+    reminderDirty = true;
+    changed();
+    renderEditor();
+  };
+  $('#remove-template').onclick = () => {
+    entry.calendarTemplate = false;
+    reminderDirty = true;
+    changed();
+    renderEditor();
+  };
+  $('#restore-template').onclick = () => {
+    entry.calendarTemplate = true;
+    reminderDirty = true;
+    changed();
+    renderEditor();
   };
   document.addEventListener('keydown', (event) => {
     if (!(event.ctrlKey || event.metaKey)) return;
