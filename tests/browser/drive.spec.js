@@ -137,6 +137,38 @@ test('failed Drive upload remains pending, retries, and concurrent edits retain 
   expect(parseRevision(state.files[0].content).entry.body).toBe('첫 번째 원본');
 });
 
+test('unchanged saves and syncs reuse the Drive file while edits preserve revision history', async ({
+  page,
+}) => {
+  const state = await mockGoogle(page);
+  await page.locator('#banner-connect').click();
+  await expect(page.locator('#drive-status')).toContainText('연결됨');
+  await page.locator('#entry-body').fill('첫 번째 기록');
+  await page.locator('#save').click();
+  await expect(page.locator('#save-state')).toContainText('드라이브 저장 완료');
+  expect(state.files).toHaveLength(1);
+  const first = parseRevision(state.files[0].content);
+
+  await page.locator('#save').click();
+  await page.locator('#sync').click();
+  await expect(page.locator('#save-state')).toContainText('드라이브 저장 완료');
+  expect(state.files).toHaveLength(1);
+
+  await page.locator('#entry-body').fill('수정한 기록');
+  await expect.poll(() => state.files.length).toBe(2);
+  await expect(page.locator('#save-state')).toContainText('드라이브 저장 완료');
+  const second = parseRevision(state.files[1].content);
+  expect(second.entry.id).toBe(first.entry.id);
+  expect(second.parents).toEqual([first.id]);
+  expect(state.files[1].name).not.toBe(state.files[0].name);
+  expect(parseRevision(state.files[0].content).entry.body).toBe('첫 번째 기록');
+
+  await page.locator('#save').click();
+  await page.locator('#sync').click();
+  await expect(page.locator('#save-state')).toContainText('드라이브 저장 완료');
+  expect(state.files).toHaveLength(2);
+});
+
 test('calendar imports once, refreshes title, and preserves notes after cancellation', async ({
   page,
 }) => {

@@ -71,10 +71,34 @@ git diff --check
 ```bash
 npm run build
 npx firebase-tools login
-npx firebase-tools deploy --only hosting --project YOUR_PROJECT_ID
+npx firebase-tools hosting:sites:create YOUR_DIARY_SITE_ID --project YOUR_PROJECT_ID
+npx firebase-tools target:apply hosting diary YOUR_DIARY_SITE_ID --project YOUR_PROJECT_ID
+npx firebase-tools deploy --only hosting:diary --project YOUR_PROJECT_ID
 ```
 
-프로젝트 ID를 실제 값으로 바꿉니다. `dist/`만 배포하며 저장소 루트나 비밀 파일은 배포하지 않습니다. 서비스 코드가 공개되어도 Google Drive의 일기·사진은 비공개입니다. 다른 정적 호스팅도 빌드 명령 `npm run build`, 출력 폴더 `dist`로 배포할 수 있습니다. 루트 경로(`/`) 배포를 전제로 합니다.
+프로젝트 ID와 일기용 사이트 ID를 실제 값으로 바꿉니다. 기존 프로젝트에 별도 Hosting 사이트를 추가하고 `diary` 대상으로 연결합니다. 이미 일기용 사이트를 만들었다면 `hosting:sites:create`는 생략합니다. 기존 웹사이트의 사이트 ID를 사용하지 마세요. `dist/`만 배포하며 저장소 루트나 비밀 파일은 배포하지 않습니다. 서비스 코드가 공개되어도 Google Drive의 일기·사진은 비공개입니다. 다른 정적 호스팅도 빌드 명령 `npm run build`, 출력 폴더 `dist`로 배포할 수 있습니다. 루트 경로(`/`) 배포를 전제로 합니다.
+
+### GitHub Actions 자동 배포
+
+이 저장소의 배포 대상은 `burndown-studio` 프로젝트의 일기 전용 `daekyuny-diary` 사이트입니다. `.firebaserc`에서 `diary` 대상으로 연결하며, 배포 주소는 `https://daekyuny-diary.web.app`입니다. OAuth 클라이언트의 승인된 JavaScript 원본에도 이 주소를 추가합니다.
+
+`.github/workflows/deploy.yml`은 PR에서 기본 테스트, 코드 형식, Chromium·모바일 Chromium·WebKit 테스트와 빌드를 검사합니다. `main` push 또는 Actions의 **Run workflow** 실행 시 같은 검사를 통과한 뒤 Firebase Hosting의 실제 사이트에 `dist/`를 배포합니다. 알림 Worker는 별도 배포합니다.
+
+저장소 **Settings → Secrets and variables → Actions**에 다음을 등록합니다.
+
+| 종류     | 이름                       | 값                                                                         |
+| -------- | -------------------------- | -------------------------------------------------------------------------- |
+| Variable | `FIREBASE_PROJECT_ID`      | 배포 대상 Firebase 프로젝트 ID (필수)                                      |
+| Variable | `FIREBASE_HOSTING_SITE`    | 별도로 만든 일기용 Hosting 사이트 ID (필수)                                |
+| Secret   | `FIREBASE_SERVICE_ACCOUNT` | 해당 프로젝트에 Hosting 배포 권한을 가진 서비스 계정의 JSON 키 전체 (필수) |
+| Variable | `GOOGLE_CLIENT_ID`         | 로컬 테스트에 사용한 OAuth 웹 클라이언트 ID (선택)                         |
+| Variable | `NOTIFICATION_SERVER`      | 배포한 알림 Worker URL (선택)                                              |
+
+서비스 계정은 [Firebase 공식 Action의 설정 안내](https://github.com/FirebaseExtended/action-hosting-deploy/blob/main/docs/service-account.md)에 따라 준비합니다. JSON 키는 GitHub Secret에 직접 등록하며 저장소에 커밋하지 않습니다. 필수 설정이 없으면 배포 단계가 오류 메시지와 함께 중단됩니다. 선택 변수는 비어 있으면 `config.json` 값을 사용하며, 클라이언트 ID는 배포 후 앱 설정에서도 입력할 수 있습니다.
+
+배포 전에 기존 프로젝트 안에 일기용 Hosting 사이트를 별도로 만듭니다. Actions는 `FIREBASE_HOSTING_SITE`를 `diary` 대상으로 연결해 해당 사이트만 배포하며, 이 값이 없으면 배포를 중단합니다. [Firebase 다중 사이트 안내](https://firebase.google.com/docs/hosting/multisites)
+
+OAuth 클라이언트의 승인된 JavaScript 원본에 일기 사이트 주소(예: `https://YOUR_DIARY_SITE_ID.web.app`)를 추가합니다. 기존 로컬 주소도 유지합니다. 배포 진행 상황과 결과는 저장소 **Actions → Test and deploy Firebase Hosting**에서 확인합니다. [Firebase GitHub 연동 안내](https://firebase.google.com/docs/hosting/github-integration)
 
 ## 무료 예약 알림 서버
 

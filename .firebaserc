@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "burndown-studio"
+  },
+  "targets": {
+    "burndown-studio": {
+      "hosting": {
+        "diary": ["daekyuny-diary"]
+      }
+    }
+  }
+}

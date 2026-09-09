@@ -1,0 +1,91 @@
+name: Test and deploy Firebase Hosting
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosting-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run format:check
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run test:e2e
+      - run: npm run test:webkit
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-test-results
+          path: test-results/
+          retention-days: 7
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Check deployment settings
+        env:
+          FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
+          FIREBASE_HOSTING_SITE: ${{ vars.FIREBASE_HOSTING_SITE }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          test -n "$FIREBASE_PROJECT_ID" || { echo '::error::Set the FIREBASE_PROJECT_ID repository variable'; exit 1; }
+          test -n "$FIREBASE_HOSTING_SITE" || { echo '::error::Set FIREBASE_HOSTING_SITE to the dedicated diary site ID'; exit 1; }
+          test -n "$FIREBASE_SERVICE_ACCOUNT" || { echo '::error::Set the FIREBASE_SERVICE_ACCOUNT repository secret'; exit 1; }
+          node --input-type=module <<'NODE'
+          import { writeFile } from 'node:fs/promises';
+          await writeFile('.firebaserc', JSON.stringify({
+            targets: {
+              [process.env.FIREBASE_PROJECT_ID]: {
+                hosting: { diary: [process.env.FIREBASE_HOSTING_SITE] },
+              },
+            },
+          }));
+          NODE
+      - run: npm ci
+      - name: Write public app configuration
+        env:
+          GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+          NOTIFICATION_SERVER: ${{ vars.NOTIFICATION_SERVER }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+          const config = JSON.parse(await readFile('config.json', 'utf8'));
+          await writeFile('config.local.json', JSON.stringify({
+            googleClientId: process.env.GOOGLE_CLIENT_ID || config.googleClientId || '',
+            notificationServer: process.env.NOTIFICATION_SERVER || config.notificationServer || '',
+          }));
+          NODE
+      - run: npm run build
+      - uses: FirebaseExtended/action-hosting-deploy@v0
+        with:
+          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          projectId: ${{ vars.FIREBASE_PROJECT_ID }}
+          channelId: live
+          target: diary
