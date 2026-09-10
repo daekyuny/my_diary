@@ -86,3 +86,14 @@ test('cross-origin requests, tampered sessions and missing offline grants cannot
   });
   assert.equal(noRefresh.code, 401);
 });
+
+test('first offline grant without a scope field still returns a session', async () => {
+  const result = response();
+  await handleAuth(request('/auth/code'), result, {
+    secret: 'test',
+    fetch: async () =>
+      Response.json({ access_token: 'access', refresh_token: 'refresh', expires_in: 3600 }),
+  });
+  assert.equal(result.code, 200);
+  assert.equal(result.body.access_token, 'access');
+});

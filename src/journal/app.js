@@ -294,7 +294,7 @@ async function refresh() {
   }
 }
 function changed() {
-  if (!entry || busy) return;
+  if (!entry) return;
   dirty = JSON.stringify(entry) !== savedContent;
   connection();
 }
@@ -432,6 +432,7 @@ async function renderPhotos() {
 async function closeEditor() {
   if (dirty && !window.confirm('저장하지 않은 변경 내용이 있습니다. 저장하지 않고 닫을까요?'))
     return;
+  if (entry) await store.remove('drafts', entry.id);
   dirty = false;
   savedContent = null;
   $('#editor-dialog').close();
@@ -932,7 +933,6 @@ async function getCalendar(date) {
       entry.events = mergeEvents(entry.events, incoming, entry.removedEventKeys || []);
       entry.calendarTemplate = true;
       dirty = true;
-      await store.put('drafts', { id: entry.id, entry: structuredClone(entry), parents });
       renderEvents();
       $('#small-dialog').close();
       await save();
@@ -957,7 +957,6 @@ $('#photo-input').onchange = () =>
       entry.images.push(image);
     }
     dirty = true;
-    await store.put('drafts', { id: entry.id, entry: structuredClone(entry), parents });
     $('#photo-input').value = '';
     await renderPhotos();
     await save();
@@ -1192,6 +1191,10 @@ async function purgeTrash(ask = true) {
     if (ids.includes(r.entry.id)) await store.remove('revisions', r.id);
   for (const d of await store.all('drafts'))
     if (ids.includes(d.entry.id)) await store.remove('drafts', d.id);
+  const references = [...(await store.all('revisions')), ...(await store.all('drafts'))];
+  const keptAssets = new Set(references.flatMap((r) => r.entry.images.map((image) => image.id)));
+  for (const asset of await store.all('assets'))
+    if (!keptAssets.has(asset.id)) await store.remove('assets', asset.id);
   await load();
   if (repository) await refresh();
   if (ask) toast(`${ids.length}개 일기를 완전 삭제했습니다.`);

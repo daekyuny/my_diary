@@ -68,7 +68,7 @@ export async function handleAuth(req, res, { secret, fetch = globalThis.fetch })
     res.json({
       access_token: tokens.access_token,
       expires_in: tokens.expires_in,
-      scope: tokens.scope || session.scope || '',
+      scope: tokens.scope || session?.scope || '',
     });
   } catch {
     res.status(503).json({ error: 'Google 인증 서버의 응답이 지연됩니다. 다시 시도해주세요.' });
