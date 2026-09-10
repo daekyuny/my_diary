@@ -62,7 +62,10 @@ export function authorize(calendar = false) {
 
 export async function request(path, options = {}) {
   if (!connected()) throw new Error('Google 연결이 필요합니다. 초안은 기기에 남아 있습니다.');
-  const response = await fetch(`https://www.googleapis.com/${path}`, {
+  const url = path.startsWith('sheets/')
+    ? `https://sheets.googleapis.com/${path.slice(7)}`
+    : `https://www.googleapis.com/${path}`;
+  const response = await fetch(url, {
     ...options,
     headers: { ...options.headers, Authorization: `Bearer ${token}` },
   });

@@ -16,10 +16,13 @@ async function mock(context, state) {
     };
   }, scope);
   await context.route('https://accounts.google.com/**', (route) => route.abort());
-  await context.route('https://www.googleapis.com/**', async (route) => {
+  await context.route(/^https:\/\/(www|sheets)\.googleapis\.com\//, async (route) => {
     const request = route.request(),
       url = new URL(request.url()),
       body = request.postDataJSON();
+    if (url.pathname.startsWith('/sheets/'))
+      return route.fulfill({ status: 404, body: 'Invalid Sheets endpoint' });
+    if (url.pathname.startsWith('/v4/')) expect(url.hostname).toBe('sheets.googleapis.com');
     const send = (json, status = 200) => route.fulfill({ json, status });
     if (url.pathname === '/drive/v3/about')
       return send({
@@ -42,7 +45,7 @@ async function mock(context, state) {
       state.exists = true;
       return send({ id: 'sheet-one' });
     }
-    if (url.pathname === '/sheets/v4/spreadsheets/sheet-one')
+    if (url.pathname === '/v4/spreadsheets/sheet-one')
       return send({
         sheets: [
           { properties: { sheetId: 0, title: 'Sheet1' } },
@@ -69,6 +72,8 @@ async function mock(context, state) {
       });
     }
     if (url.pathname.endsWith(':batchUpdate')) {
+      if (state.failInitialize && body.requests.some((r) => r.addSheet))
+        return send({ error: { message: 'Sheets API 초기 설정 실패' } }, 403);
       const isSave = body.requests.some(
         (r) =>
           r.appendCells?.sheetId === 100 &&
@@ -206,5 +211,57 @@ test('simultaneous device edits preserve both branches and field definitions tra
   } finally {
     await a.close();
     await b.close();
+  }
+});
+
+test('failed initialization reuses the existing file and uploads unassigned drafts after repair', async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  const state = { exists: false, tabs: {}, failInitialize: true };
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await page.goto('/');
+    await expect(page.locator('#new-entry')).toBeEnabled();
+    await page.locator('#banner-connect').click();
+    await page.locator('#create-sheet').click();
+    await expect(page.locator('#cloud-error')).toContainText('초기 설정 실패');
+    expect(state.exists).toBe(true);
+    expect(Object.keys(state.tabs)).toHaveLength(0);
+    await page.locator('#close-settings').click();
+    await page.locator('#quick-entry').click();
+    await page.locator('#entry-title').fill('빈 시트 연결 전에 작성한 글');
+    await page.locator('#entry-body').fill('연결이 복구되면 저장되어야 한다.');
+    await page.locator('#save').click();
+    await page.reload();
+    await expect(page.locator('#new-entry')).toBeEnabled();
+    await page.locator('#banner-connect').click();
+    await expect(page.locator('#repair-sheet')).toBeVisible();
+    await expect(page.locator('#sheet-select')).toHaveValue('sheet-one');
+    await expect(page.locator('#create-sheet')).not.toBeVisible();
+    state.failInitialize = false;
+    await page.locator('#repair-sheet').click();
+    await expect(page.locator('#settings-dialog')).not.toBeVisible();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    expect(state.tabs['일기'].rows).toHaveLength(2);
+    expect(state.tabs['일기'].rows[1][10]).toBe('연결이 복구되면 저장되어야 한다.');
+    await page.reload();
+    await expect(page.locator('#new-entry')).toBeEnabled();
+    await page.locator('#banner-connect').click();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    expect(state.tabs['일기'].rows).toHaveLength(2);
+    await page
+      .locator(
+        (await page.locator('#open-settings').isVisible()) ? '#open-settings' : '#mobile-settings',
+      )
+      .click();
+    await expect(page.locator('#find-sheets')).toBeVisible();
+    await page.locator('#find-sheets').click();
+    await expect(page.locator('#select-sheet')).toBeVisible();
+    await page.locator('#select-sheet').click();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+  } finally {
+    await context.close();
   }
 });

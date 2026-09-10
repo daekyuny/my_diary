@@ -274,7 +274,9 @@
           </div>
           <p class="muted" id="sheet-help">Google 연결 후 기존 시트를 확인하거나 새로 만듭니다.</p>
           <button id="create-sheet" class="button">새 My Diary 시트 만들기</button>
-          <div id="sheet-options" hidden>
+          <div id="sheet-options">
+            <button id="find-sheets" class="button">기존 시트 찾기·연결</button>
+            <p id="cloud-error" class="muted" role="alert" hidden></p>
             <label class="form-label"
               >사용할 My Diary 시트<select id="sheet-select"></select
             ></label>

@@ -73,6 +73,7 @@ function locks(value) {
     'settings-connect',
     'disconnect',
     'select-sheet',
+    'find-sheets',
     'create-sheet',
     'repair-sheet',
     'import',
@@ -89,6 +90,8 @@ async function task(fn) {
   try {
     return await fn();
   } catch (error) {
+    $('#cloud-error').textContent = error.message || '작업을 완료하지 못했습니다.';
+    $('#cloud-error').hidden = false;
     toast(error.message || '작업을 완료하지 못했습니다.', true);
   } finally {
     busy = false;
@@ -107,9 +110,11 @@ function connection() {
         ? pending
           ? '클라우드 저장 대기'
           : 'Sheets 연결됨'
-        : account
-          ? 'Google 재연결 필요'
-          : '기기에 저장';
+        : online
+          ? '시트 연결 필요 · 기기 저장'
+          : account
+            ? 'Google 재연결 필요'
+            : '기기에 저장';
   $('#connect-banner').hidden = Boolean(online && repository);
   $('#account-name').textContent = account?.displayName || '나만의 일기장';
   $('#account-caption').textContent = account?.emailAddress || 'Google Sheets에 연결하세요';
@@ -118,6 +123,10 @@ function connection() {
     ? `${account.emailAddress} · ${online ? 'Google 연결됨' : '재연결 필요'}`
     : '연결 전 기록은 이 기기에만 저장됩니다.';
   $('#disconnect').hidden = !account;
+  $('#sheet-options').hidden = false;
+  $('#sheet-select').parentElement.hidden = !$('#sheet-select').options.length;
+  $('#select-sheet').hidden = !$('#sheet-select').options.length;
+  $('#repair-sheet').hidden = !$('#sheet-select').options.length;
   $('#open-sheet').hidden = !repository;
   $('#create-sheet').hidden = Boolean(repository) || Boolean($('#sheet-select').options.length);
   $('#sheet-help').textContent = repository
@@ -493,6 +502,9 @@ async function selectRepository(id) {
   await candidate.prepare();
   await save(false);
   const previousOwner = owner();
+  const unattached = previousOwner.endsWith('-unassigned')
+    ? { revisions: await store.all('revisions'), assets: await store.all('assets') }
+    : null;
   repository = candidate;
   if (settings.sheetFolders?.[id]) google.useFolder(settings.sheetFolders[id]);
   settings.sheets ||= {};
@@ -502,15 +514,21 @@ async function selectRepository(id) {
     $('#editor-dialog').close();
     entry = null;
     await store.openStore(owner());
+    if (unattached) {
+      for (const asset of unattached.assets) await store.put('assets', asset);
+      for (const revision of unattached.revisions)
+        if (!(await store.get('revisions', revision.id))) await store.put('revisions', revision);
+    }
     await recover();
     await load();
   }
-  await refresh();
+  await save();
+  $('#cloud-error').hidden = true;
   $('#sheet-options').hidden = true;
   $('#settings-dialog').close();
   toast('같은 Google 계정의 기기에서 이 시트를 함께 사용합니다.');
 }
-function connect(calendar = false) {
+function connect(calendar = false, choose = false) {
   if (!ready || busy) return;
   settings.googleClientId = $('#settings-dialog').open
     ? $('#setting-client').value.trim()
@@ -564,7 +582,7 @@ function connect(calendar = false) {
       $('#repair-sheet').hidden = !files.length;
       $('#create-sheet').hidden = Boolean(files.length);
     };
-    if (preferred || files.length === 1) {
+    if (!choose && (preferred || files.length === 1)) {
       try {
         await selectRepository((preferred || files[0]).id);
       } catch (error) {
@@ -944,11 +962,12 @@ $('#sync').onclick = () => {
       toast('최신 기록을 불러왔습니다.');
     });
 };
+$('#find-sheets').onclick = () => connect(false, true);
 $('#create-sheet').onclick = () => {
   if (!google.connected()) return connect();
   task(async () => {
-    repository = await createSheet();
-    await selectRepository(repository.id);
+    const created = await createSheet();
+    await selectRepository(created.id);
   });
 };
 $('#select-sheet').onclick = () => task(() => selectRepository($('#sheet-select').value));
