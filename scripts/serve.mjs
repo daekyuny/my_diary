@@ -17,6 +17,7 @@ const mime = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
 };
+let journalBuild;
 const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url, 'http://localhost');
@@ -50,7 +51,16 @@ const server = http.createServer(async (request, response) => {
         if (error.code !== 'ENOENT') throw error;
       }
     }
-    if (pathname === '/vendor/journal-app.js' && root === process.cwd()) await bundle();
+    if (pathname === '/vendor/journal-app.js' && root === process.cwd()) {
+      const content = await (journalBuild ||= bundle()
+        .then(() => readFile(file))
+        .finally(() => {
+          journalBuild = null;
+        }));
+      response.writeHead(200, { 'Content-Type': mime['.js'], 'Cache-Control': 'no-store' });
+      response.end(content);
+      return;
+    }
     if (!(await stat(file)).isFile()) throw new Error('Not a file');
     response.writeHead(200, {
       'Content-Type': mime[path.extname(file)] || 'application/octet-stream',
