@@ -265,3 +265,41 @@ test('failed initialization reuses the existing file and uploads unassigned draf
     await context.close();
   }
 });
+
+test('pre-login records upload explicitly to the selected sheet and open its diary tab', async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  const state = { exists: false, tabs: {} };
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await page.goto('/');
+    await expect(page.locator('#new-entry')).toBeEnabled();
+    await page.locator('#quick-entry').click();
+    await page.locator('#entry-title').fill('모바일에서 로그인 전에 쓴 글');
+    await page.locator('#save').click();
+    await expect(page.locator('#editor-dialog')).not.toBeVisible();
+    await page.locator('#banner-connect').click();
+    await page.locator('#create-sheet').click();
+    await expect(page.locator('#settings-dialog')).not.toBeVisible();
+    await page
+      .locator(
+        (await page.locator('#open-settings').isVisible()) ? '#open-settings' : '#mobile-settings',
+      )
+      .click();
+    await expect(page.locator('#sheet-details')).toContainText('시트에서 확인한 일기 0개');
+    await page.locator('#move-local').click();
+    await expect(page.locator('#sheet-details')).toContainText('시트에서 확인한 일기 1개');
+    await expect(page.locator('#open-sheet')).toHaveAttribute(
+      'href',
+      'https://docs.google.com/spreadsheets/d/sheet-one/edit#gid=100',
+    );
+    expect(state.tabs['일기'].rows[1][5]).toBe('모바일에서 로그인 전에 쓴 글');
+    await page.locator('#move-local').click();
+    await expect(page.locator('#move-local')).toBeEnabled();
+    expect(state.tabs['일기'].rows).toHaveLength(2);
+  } finally {
+    await context.close();
+  }
+});

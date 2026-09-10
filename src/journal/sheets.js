@@ -112,7 +112,7 @@ export class SheetsRepository {
     this.settings = [];
   }
   get url() {
-    return `https://docs.google.com/spreadsheets/d/${this.id}/edit`;
+    return `https://docs.google.com/spreadsheets/d/${this.id}/edit#gid=${this.tabs?.[0] ?? 100}`;
   }
   async values(ranges) {
     const query = new URLSearchParams({ valueRenderOption: 'UNFORMATTED_VALUE' });

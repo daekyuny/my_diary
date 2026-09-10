@@ -22,7 +22,12 @@ const SHELL = [
   '/assets/icon-512.png',
 ];
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(SHELL))
+      .then(() => self.skipWaiting()),
+  );
 });
 self.addEventListener('activate', (event) => {
   event.waitUntil(

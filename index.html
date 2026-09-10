@@ -272,7 +272,10 @@
               >내 시트 열기 ↗</a
             >
           </div>
+          <p class="muted" id="sheet-details" style="overflow-wrap: anywhere"></p>
           <p class="muted" id="sheet-help">Google 연결 후 기존 시트를 확인하거나 새로 만듭니다.</p>
+          <button id="move-local" class="button" hidden>연결 전 기기 기록을 이 시트에 저장</button>
+          <p class="muted">로그인 전에 작성한 기록은 위 버튼으로 연결된 시트에 저장합니다.</p>
           <button id="create-sheet" class="button">새 My Diary 시트 만들기</button>
           <div id="sheet-options">
             <button id="find-sheets" class="button">기존 시트 찾기·연결</button>
@@ -304,7 +307,6 @@
             <button id="import" class="button"><span data-icon="upload"></span>ZIP 가져오기</button
             ><button id="export" class="button"><span data-icon="download"></span>전체 백업</button>
           </div>
-          <button id="move-local" class="text-button" hidden>연결 전 기기 기록 가져오기</button>
         </section>
       </div>
     </dialog>

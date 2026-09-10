@@ -142,7 +142,10 @@ function connection() {
         ? '기존 시트를 선택해 연결해주세요.'
         : '아직 시트가 연결되지 않았습니다. 새 My Diary 시트 만들기를 눌러주세요.';
   if (repository) $('#open-sheet').href = repository.url;
-  $('#move-local').hidden = !account;
+  $('#move-local').hidden = !account || !repository;
+  $('#sheet-details').textContent = repository
+    ? `시트 ID: ${repository.id} · 시트에서 확인한 일기 ${entryGroups(repository.index).length}개 · 이 기기 저장 대기 ${pending}개${online ? '' : ' · 재연결 후 최신 개수 확인'}`
+    : '연결된 시트 없음 · 현재 기록은 이 기기에만 저장됩니다.';
   if (entry)
     $('#save-state').textContent = dirty
       ? '기기 초안 · 저장 대기'
@@ -1098,6 +1101,8 @@ $('#export').onclick = () =>
   });
 $('#move-local').onclick = () =>
   task(async () => {
+    if (!repository || !google.connected())
+      throw new Error('먼저 Google에 연결하고 저장할 시트를 선택해주세요.');
     await save(false);
     const currentOwner = owner();
     let revisions, assets;
