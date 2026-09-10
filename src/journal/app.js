@@ -294,11 +294,10 @@ async function save(sync = true) {
   await draftWrite;
   if (dirty) {
     const revision = makeRevision(entry, parents);
-    await store.put('revisions', revision);
+    await store.commitRevision(revision);
     activeRevision = revision.id;
     parents = [revision.id];
     dirty = false;
-    await store.remove('drafts', entry.id);
     await load();
   }
   if (sync && repository && google.connected() && navigator.onLine) {
@@ -602,8 +601,7 @@ function connect(calendar = false, choose = false) {
 async function recover() {
   for (const draft of await store.all('drafts')) {
     const revision = makeRevision(draft.entry, draft.parents);
-    await store.put('revisions', revision);
-    await store.remove('drafts', draft.id);
+    await store.commitRevision(revision);
   }
 }
 function setView(next) {
