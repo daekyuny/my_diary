@@ -31,6 +31,7 @@ let account = settings.account || null,
   activeRevision = '',
   dirty = false,
   busy = false,
+  closeRequested = false,
   ready = false;
 let draftWrite = Promise.resolve(),
   saveTimer,
@@ -62,7 +63,7 @@ function toast(message, error = false) {
 function locks(value) {
   $('#editor-form')
     .querySelectorAll('input,textarea,select,button')
-    .forEach((el) => (el.disabled = value));
+    .forEach((el) => (el.disabled = value && !['save', 'close-editor'].includes(el.id)));
   for (const id of [
     'new-entry',
     'quick-entry',
@@ -97,6 +98,10 @@ async function task(fn) {
     busy = false;
     locks(false);
     connection();
+    if (closeRequested) {
+      closeRequested = false;
+      task(closeEditor);
+    }
   }
 }
 function connection() {
@@ -695,11 +700,19 @@ $('#records').onclick = (e) => {
     render();
   }
 };
+function requestClose() {
+  if (busy) closeRequested = true;
+  else task(closeEditor);
+}
 $('#editor-form').onsubmit = (e) => {
   e.preventDefault();
-  task(closeEditor);
+  requestClose();
 };
-$('#close-editor').onclick = () => task(closeEditor);
+$('#save').onclick = (e) => {
+  e.preventDefault();
+  requestClose();
+};
+$('#close-editor').onclick = requestClose;
 $('#editor-dialog').addEventListener('cancel', (e) => {
   e.preventDefault();
   task(closeEditor);
