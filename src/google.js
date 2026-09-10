@@ -36,12 +36,22 @@ export function authorize(calendar = false) {
       ),
     );
   return new Promise((resolve, reject) => {
+    let finished = false;
+    const timer = setTimeout(() => {
+      finished = true;
+      reject(
+        new Error('Google 로그인 응답을 받지 못했습니다. 로그인 창을 확인한 뒤 다시 연결해주세요.'),
+      );
+    }, 90000);
     const wanted = [DRIVE_SCOPE, ...(calendar ? [CALENDAR_SCOPE] : [])];
     google.accounts.oauth2
       .initTokenClient({
         client_id: clientId,
         scope: wanted.join(' '),
         callback(response) {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
           if (response.error || !response.access_token)
             return reject(new Error('Google 연결이 취소되었거나 거부되었습니다.'));
           if (!google.accounts.oauth2.hasGrantedAllScopes(response, ...wanted))
@@ -53,6 +63,9 @@ export function authorize(calendar = false) {
           resolve();
         },
         error_callback() {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
           reject(new Error('로그인 창이 닫혔습니다. 팝업을 허용하고 다시 연결해주세요.'));
         },
       })
@@ -65,10 +78,27 @@ export async function request(path, options = {}) {
   const url = path.startsWith('sheets/')
     ? `https://sheets.googleapis.com/${path.slice(7)}`
     : `https://www.googleapis.com/${path}`;
-  const response = await fetch(url, {
-    ...options,
-    headers: { ...options.headers, Authorization: `Bearer ${token}` },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: { ...options.headers, Authorization: `Bearer ${token}` },
+    });
+    // Include response-body transfer in the deadline, not only the response headers.
+    await response.clone().arrayBuffer();
+  } catch (error) {
+    if (controller.signal.aborted)
+      throw new Error(
+        'Google 응답이 30초 동안 없어 중단했습니다. 기기 기록은 남아 있습니다. 네트워크를 확인하고 다시 연결해주세요.',
+      );
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+
   if (!response.ok) {
     if (response.status === 401) {
       disconnect();

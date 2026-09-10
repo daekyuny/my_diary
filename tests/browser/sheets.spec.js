@@ -23,6 +23,7 @@ async function mock(context, state) {
     if (url.pathname.startsWith('/sheets/'))
       return route.fulfill({ status: 404, body: 'Invalid Sheets endpoint' });
     if (url.pathname.startsWith('/v4/')) expect(url.hostname).toBe('sheets.googleapis.com');
+    if (state.stall) return;
     const send = (json, status = 200) => route.fulfill({ json, status });
     if (url.pathname === '/drive/v3/about')
       return send({
@@ -299,6 +300,30 @@ test('pre-login records upload explicitly to the selected sheet and open its dia
     await page.locator('#move-local').click();
     await expect(page.locator('#move-local')).toBeEnabled();
     expect(state.tabs['일기'].rows).toHaveLength(2);
+  } finally {
+    await context.close();
+  }
+});
+
+test('stalled Google requests time out and allow a fresh connection', async ({ browser }) => {
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  const state = { exists: false, tabs: {}, stall: true };
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await page.goto('/');
+    await expect(page.locator('#new-entry')).toBeEnabled();
+    await page.clock.install();
+    const request = page.waitForRequest((request) => request.url().includes('/drive/v3/about'));
+    await page.locator('#banner-connect').click();
+    await request;
+    await page.clock.fastForward(30001);
+    await expect(page.locator('#toast')).toContainText('30초');
+    await expect(page.locator('#banner-connect')).toBeEnabled();
+    state.stall = false;
+    await page.locator('#banner-connect').click();
+    await page.locator('#create-sheet').click();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
   } finally {
     await context.close();
   }
