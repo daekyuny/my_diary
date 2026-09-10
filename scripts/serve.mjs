@@ -44,6 +44,7 @@ const server = http.createServer(async (request, response) => {
           JSON.stringify({
             googleClientId: config.googleClientId || '',
             notificationServer: config.notificationServer || '',
+            authServer: Boolean(config.authServer),
           }),
         );
         return;

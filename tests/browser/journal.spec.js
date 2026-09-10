@@ -13,6 +13,13 @@ const settings = async (page) => {
     )
     .click();
 };
+const saveClose = async (page) => {
+  if (await page.locator('#save').isEnabled()) {
+    await page.locator('#save').click();
+    await expect(page.locator('#save')).toBeDisabled();
+  }
+  await page.locator('#close-editor').click();
+};
 const newEntry = async (page) => {
   await page.locator('#quick-entry').click();
   await expect(page.locator('#editor-dialog')).toBeVisible();
@@ -27,7 +34,7 @@ test('responsive journal writes separate same-day entries, searches and switches
     await page.locator('#entry-title').fill(title);
     await page.locator('#entry-body').fill('오늘 기록한 숫자 12345');
     await page.locator('#entry-tags').fill('일상, 산책');
-    await page.locator('#save').click();
+    await saveClose(page);
     await expect(page.locator('#editor-dialog')).not.toBeVisible();
   }
   await expect(page.locator('.record')).toHaveCount(2);
@@ -65,7 +72,7 @@ test('field settings add, rename and hide definitions while retaining historical
   await page.locator('#add-field').click();
   await page.locator('[data-add-field]').click();
   await page.locator('[data-field-value]').fill('서울');
-  await page.locator('#save').click();
+  await saveClose(page);
   await settings(page);
   await page.locator('[data-edit-definition]').click();
   await page.locator('#definition-name').fill('방문한 곳');
@@ -78,7 +85,7 @@ test('field settings add, rename and hide definitions while retaining historical
   await page.locator('.record').click();
   await expect(page.locator('#fields label')).toHaveText('방문한 곳');
   await expect(page.locator('[data-field-value]')).toHaveValue('서울');
-  await page.locator('#save').click();
+  await saveClose(page);
   await page.reload();
   await page.locator('.record').click();
   await expect(page.locator('[data-field-value]')).toHaveValue('서울');
@@ -89,16 +96,16 @@ test('pin and archive remain editable and body HTML never executes', async ({ pa
   await page.locator('#entry-title').fill('기억');
   await page.locator('#entry-body').fill('<img src=x onerror="window.hacked=1">');
   await page.locator('#pin-entry').click();
-  await page.locator('#save').click();
+  await saveClose(page);
   await page.locator('.record').click();
   await expect(page.locator('#pin-entry')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('#archive-entry').click();
-  await page.locator('#save').click();
+  await saveClose(page);
   await expect(page.locator('.record')).toHaveCount(0);
   await page.locator('[data-collection=archive]:visible').click();
   await page.locator('.record').click();
   await page.locator('#archive-entry').click();
-  await page.locator('#save').click();
+  await saveClose(page);
   await expect(page.locator('.record')).toHaveCount(0);
   expect(await page.evaluate(() => window.hacked)).toBeUndefined();
 });
@@ -166,4 +173,31 @@ test('journal design captures populated list, cards, calendar and editor', async
     fullPage: false,
   });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('manual save stays disabled until changed and closing unsaved edits asks for confirmation', async ({
+  page,
+}) => {
+  await newEntry(page);
+  await expect(page.locator('#save')).toBeDisabled();
+  await page.locator('#entry-title').fill('저장한 제목');
+  await page.locator('#save').click();
+  await expect(page.locator('#editor-dialog')).toBeVisible();
+  await expect(page.locator('#save')).toBeDisabled();
+  await page.locator('#entry-body').fill('저장하지 않을 변경');
+  await page.waitForTimeout(1600);
+  await expect(page.locator('#save')).toBeEnabled();
+  page.once('dialog', (dialog) => {
+    expect(dialog.message()).toContain('저장하지 않은');
+    return dialog.dismiss();
+  });
+  await page.locator('#close-editor').click();
+  await expect(page.locator('#editor-dialog')).toBeVisible();
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.locator('#close-editor').click();
+  await page.locator('.record').click();
+  await expect(page.locator('#entry-body')).toHaveValue('');
+  await page.locator('#entry-title').fill('다른 제목');
+  await page.locator('#entry-title').fill('저장한 제목');
+  await expect(page.locator('#save')).toBeDisabled();
 });

@@ -16,10 +16,13 @@
 
 - 루트 화면을 반응형 Sheets 일기 앱으로 교체했다. 목록·카드·캘린더, 날짜별 작성, 검색, 사진, 사용자 정의 항목 설정을 제공한다.
 - 추가 항목은 고유 ID를 사용하며 이름 변경·숨김 후에도 기존 값을 유지한다. 정의는 시트에 함께 저장한다.
-- Sheets 저장 계층은 수정 이력을 추가하는 방식으로 저장하며 동시 편집 분기를 보존한다. 사진은 같은 Drive 폴더의 attachments에 저장한다.
+- Sheets 저장 계층은 일기당 현재 행을 직접 갱신한다. 연결 시 과거 이력은 최신 값만 남긴다. 동시 저장은 마지막 요청을 반영한다. 사진은 같은 Drive 폴더의 attachments에 저장한다.
 - 연결 전 기록과 계정별·시트별 임시 저장소를 분리한다. 연결 전 기록의 계정 이동은 설정에서 명시적으로 실행한다.
 - Keep ZIP 가져오기와 ZIP 내보내기를 구현했다. 프로젝트 원본 ZIP은 열거나 변경하지 않았다.
 - 중단한 Firestore 실험과 의존성은 제거했다. 기존 Drive 화면은 legacy.html에 보존했다.
 - Keep 읽기 실험은 src/keep-probe.html에 남아 있다. 개인 Gmail 로그인에서 keep.readonly invalid_scope로 실패했으며 실제 Keep 데이터 조회는 하지 못했다.
 - 자동 테스트는 모의 Google API와 독립 브라우저를 사용한다. 실제 Gmail OAuth, API 활성화, 실제 Drive 폴더 접근은 사용자 브라우저에서 확인해야 한다.
 - 앱은 Firebase Hosting에 배포되어 있다. Sheets API 주소 오류를 발견해 공식 sheets.googleapis.com 주소로 수정했다. 기존 빈 파일 복구·계정 임시 기록 업로드·재연결을 회귀 테스트로 검증한다. 실제 계정의 최종 저장 확인은 사용자 로그인 후 진행한다. 설치·테스트·운영 제한은 README.md를 참고한다.
+
+- 2026-09-11: 수동 저장·닫기 확인, 휴지통과 기간별 완전 삭제, 빈 기본 시트 정리로 전환했다.
+- OAuth 코드 교환 및 토큰 자동 갱신 서버를 추가했다. Secret Manager의 DIARY_GOOGLE_CLIENT_SECRET 등록 후 함수 배포와 DIARY_AUTH_ENABLED 활성화가 필요하다.

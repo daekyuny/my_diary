@@ -25,6 +25,8 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - run: npm ci --prefix server
+      - run: node --input-type=module -e "await import('./server/index.js')"
       - run: npm test
       - run: npm run format:check
       - run: npx playwright install --with-deps chromium webkit
@@ -73,6 +75,7 @@ jobs:
         env:
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
           NOTIFICATION_SERVER: ${{ vars.NOTIFICATION_SERVER }}
+          DIARY_AUTH_ENABLED: ${{ vars.DIARY_AUTH_ENABLED }}
         run: |
           node --input-type=module <<'NODE'
           import { readFile, writeFile } from 'node:fs/promises';
@@ -80,7 +83,13 @@ jobs:
           await writeFile('config.local.json', JSON.stringify({
             googleClientId: process.env.GOOGLE_CLIENT_ID || config.googleClientId || '',
             notificationServer: process.env.NOTIFICATION_SERVER || config.notificationServer || '',
+            authServer: process.env.DIARY_AUTH_ENABLED === 'true',
           }));
+          if (process.env.DIARY_AUTH_ENABLED === 'true') {
+            const firebase = JSON.parse(await readFile('firebase.json', 'utf8'));
+            firebase.hosting.rewrites.unshift({ source: '/auth/**', function: { functionId: 'diaryAuth', region: 'asia-northeast3' } });
+            await writeFile('firebase.json', JSON.stringify(firebase));
+          }
           NODE
       - run: npm run build
       - uses: FirebaseExtended/action-hosting-deploy@v0

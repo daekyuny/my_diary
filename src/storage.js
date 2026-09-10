@@ -66,3 +66,22 @@ export function commitRevision(revision) {
     tx.onabort = () => reject(tx.error || new Error('기기에 저장하지 못했습니다.'));
   });
 }
+
+export function replaceCurrent(revision) {
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(['revisions', 'drafts'], 'readwrite');
+    const records = tx.objectStore('revisions');
+    const cursor = records.openCursor();
+    cursor.onsuccess = () => {
+      const item = cursor.result;
+      if (item) {
+        if (item.value.entry.id === revision.entry.id) item.delete();
+        item.continue();
+      } else records.put(revision);
+    };
+    tx.objectStore('drafts').delete(revision.entry.id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('기기에 저장하지 못했습니다.'));
+  });
+}

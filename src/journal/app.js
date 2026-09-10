@@ -2,14 +2,8 @@ import { icon, hydrateIcons } from './icons.js';
 import { escape, visibleGroups, cards, calendarHTML, validateDefinition } from './views.js';
 import { SheetsRepository, findSheets, createSheet, initializeSheet } from './sheets.js';
 import { parseArchive, stableKeepIds, makeBackup } from './backup.js';
-import {
-  newEntry,
-  localDate,
-  validDate,
-  makeRevision,
-  entryGroups,
-  mergeEvents,
-} from '../model.js';
+import { newEntry, localDate, validDate, makeRevision, mergeEvents } from '../model.js';
+import { entryGroups, expired } from './current.js';
 import * as store from '../storage.js';
 import * as google from '../google.js';
 import { assetBlob } from '../sync.js';
@@ -32,6 +26,7 @@ let account = settings.account || null,
   dirty = false,
   busy = false,
   closeRequested = false,
+  savedContent = null,
   ready = false;
 let draftWrite = Promise.resolve(),
   saveTimer,
@@ -63,7 +58,7 @@ function toast(message, error = false) {
 function locks(value) {
   $('#editor-form')
     .querySelectorAll('input,textarea,select,button')
-    .forEach((el) => (el.disabled = value && !['save', 'close-editor'].includes(el.id)));
+    .forEach((el) => (el.disabled = value));
   for (const id of [
     'new-entry',
     'quick-entry',
@@ -81,6 +76,8 @@ function locks(value) {
     'export',
     'move-local',
     'new-definition',
+    'purge-trash',
+    'save-retention',
   ])
     $('#' + id).disabled = value;
 }
@@ -127,6 +124,7 @@ function connection() {
   $('#settings-account').textContent = account
     ? `${account.emailAddress} · ${online ? 'Google 연결됨' : '재연결 필요'}`
     : '연결 전 기록은 이 기기에만 저장됩니다.';
+  $('#save').disabled = busy || !dirty;
   $('#disconnect').hidden = !account;
   $('#sheet-options').hidden = false;
   $('#sheet-select').parentElement.hidden = !$('#sheet-select').options.length;
@@ -142,13 +140,14 @@ function connection() {
         ? '기존 시트를 선택해 연결해주세요.'
         : '아직 시트가 연결되지 않았습니다. 새 My Diary 시트 만들기를 눌러주세요.';
   if (repository) $('#open-sheet').href = repository.url;
+  $('#trash-days').value = String(repository?.retentionDays ?? settings.trashDays ?? 30);
   $('#move-local').hidden = !account || !repository;
   $('#sheet-details').textContent = repository
     ? `시트 ID: ${repository.id} · 시트에서 확인한 일기 ${entryGroups(repository.index).length}개 · 이 기기 저장 대기 ${pending}개${online ? '' : ' · 재연결 후 최신 개수 확인'}`
     : '연결된 시트 없음 · 현재 기록은 이 기기에만 저장됩니다.';
   if (entry)
     $('#save-state').textContent = dirty
-      ? '기기 초안 · 저장 대기'
+      ? '저장하지 않은 변경'
       : groups.find((g) => g.latest.entry.id === entry.id)?.heads.length > 1
         ? '다른 기기 수정 확인'
         : groups.find((g) => g.latest.id === activeRevision)?.latest.sheetSaved
@@ -203,7 +202,7 @@ function render() {
     {
       journal: view === 'calendar' ? '날짜로 보는 기록' : '나의 기록',
       pinned: '고정한 기록',
-      archive: '보관한 기록',
+      archive: '삭제한 기록',
     }[collection] + '<span class="title-dot">.</span>';
   $('#page-description').textContent =
     collection === 'archive'
@@ -237,7 +236,16 @@ function render() {
   connection();
 }
 async function load() {
-  groups = entryGroups(await store.all('revisions'));
+  const revisions = await store.all('revisions');
+  for (const r of revisions) {
+    if (r.entry.archived && !r.entry.deletedAt) {
+      r.entry.archived = false;
+      await store.put('revisions', r);
+    }
+  }
+  groups = entryGroups(revisions);
+  const keep = new Set(groups.map((g) => g.latest.id));
+  for (const r of revisions) if (!keep.has(r.id)) await store.remove('revisions', r.id);
   render();
 }
 async function hydrate(revision) {
@@ -256,10 +264,16 @@ async function refresh() {
   settings.definitions[account.permissionId] = definitions;
   persistSettings();
   const local = new Map((await store.all('revisions')).map((r) => [r.id, r]));
+  const current = new Set(remote.map((r) => r.id));
+  for (const r of local.values())
+    if (r.sheetSaved && !current.has(r.id)) await store.remove('revisions', r.id);
   for (const revision of remote) {
     const existing = local.get(revision.id);
-    await store.put(
-      'revisions',
+    const pending = [...local.values()].find(
+      (r) => r.entry.id === revision.entry.id && !r.sheetSaved,
+    );
+    if (pending && pending.id !== revision.id) continue;
+    await store.replaceCurrent(
       existing && !existing.summary
         ? { ...existing, sheetSaved: true, row: revision.row }
         : revision,
@@ -272,40 +286,33 @@ async function refresh() {
     if (group && group.heads.length === 1 && group.latest.id !== activeRevision) {
       const r = await hydrate(group.latest);
       entry = structuredClone(r.entry);
+      savedContent = JSON.stringify(entry);
       parents = [r.id];
       activeRevision = r.id;
       fillEditor();
     }
-    $('#conflict').hidden = !(group?.heads.length > 1);
   }
 }
 function changed() {
   if (!entry || busy) return;
-  dirty = true;
-  const snapshot = { id: entry.id, entry: structuredClone(entry), parents: [...parents] };
-  draftWrite = draftWrite.catch(() => {}).then(() => store.put('drafts', snapshot));
-  draftWrite.catch((error) =>
-    toast(`기기 초안 저장 실패: ${error.message}. 창을 닫지 마세요.`, true),
-  );
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    if (busy) {
-      saveTimer = setTimeout(() => {
-        if (dirty) task(() => save());
-      }, 1200);
-    } else task(() => save());
-  }, 1400);
+  dirty = JSON.stringify(entry) !== savedContent;
   connection();
 }
-async function save(sync = true) {
+
+async function save(sync = true, commit = false) {
   clearTimeout(saveTimer);
   await draftWrite;
-  if (dirty) {
-    const revision = makeRevision(entry, parents);
-    await store.commitRevision(revision);
+  if (dirty && commit) {
+    const previous = groups.find((g) => g.latest.entry.id === entry.id)?.latest;
+    const revision = {
+      ...makeRevision(entry, parents),
+      remoteKnown: Boolean(previous?.sheetSaved || previous?.remoteKnown),
+    };
+    await store.replaceCurrent(revision);
     activeRevision = revision.id;
     parents = [revision.id];
     dirty = false;
+    savedContent = JSON.stringify(entry);
     await load();
   }
   if (sync && repository && google.connected() && navigator.onLine) {
@@ -321,8 +328,11 @@ async function save(sync = true) {
         image.driveId = asset.driveId;
       }
       await repository.save(revision);
-      await store.put('revisions', { ...revision, sheetSaved: true });
-      if (entry?.id === revision.entry.id) entry.images = structuredClone(revision.entry.images);
+      await store.replaceCurrent({ ...revision, sheetSaved: true, remoteKnown: true });
+      if (!dirty && entry?.id === revision.entry.id) {
+        entry.images = structuredClone(revision.entry.images);
+        savedContent = JSON.stringify(entry);
+      }
     }
     await refresh();
   }
@@ -336,13 +346,13 @@ async function openEntry(id, date = day || localDate()) {
   parents = revision ? [revision.id] : [];
   activeRevision = revision?.id || '';
   dirty = false;
+  savedContent = JSON.stringify(entry);
   const draft = await store.get('drafts', entry.id);
   if (draft) {
     entry = draft.entry;
     parents = draft.parents;
     dirty = true;
   }
-  $('#conflict').hidden = !(group?.heads.length > 1);
   fillEditor();
   if (!$('#editor-dialog').open) $('#editor-dialog').showModal();
   $('#entry-title').focus();
@@ -380,9 +390,7 @@ function fillEditor() {
   });
   $('#pin-entry').setAttribute('aria-pressed', String(Boolean(entry.pinned)));
   $('#pin-entry').setAttribute('aria-label', entry.pinned ? '상단 고정 해제' : '상단 고정');
-  $('#archive-entry span:last-child').textContent = entry.archived
-    ? '보관함에서 꺼내기'
-    : '보관하기';
+  $('#archive-entry span:last-child').textContent = entry.archived ? '복원하기' : '삭제하기';
   $('#word-count').textContent = `${entry.body.length.toLocaleString()}자`;
   renderFields();
   renderEvents();
@@ -422,7 +430,10 @@ async function renderPhotos() {
   }
 }
 async function closeEditor() {
-  await save();
+  if (dirty && !window.confirm('저장하지 않은 변경 내용이 있습니다. 저장하지 않고 닫을까요?'))
+    return;
+  dirty = false;
+  savedContent = null;
   $('#editor-dialog').close();
   entry = null;
   photoGeneration++;
@@ -507,6 +518,7 @@ function definitionDialog(def = { id: crypto.randomUUID(), name: '', type: 'text
 async function selectRepository(id) {
   const candidate = new SheetsRepository(id);
   await candidate.prepare();
+  await candidate.compact();
   await save(false);
   const previousOwner = owner();
   const unattached = previousOwner.endsWith('-unassigned')
@@ -530,6 +542,7 @@ async function selectRepository(id) {
     await load();
   }
   await save();
+  await purgeTrash(false);
   $('#cloud-error').hidden = true;
   $('#sheet-options').hidden = true;
   $('#settings-dialog').close();
@@ -541,7 +554,7 @@ function connect(calendar = false, choose = false) {
     ? $('#setting-client').value.trim()
     : settings.googleClientId;
   persistSettings();
-  google.configureGoogle(settings.googleClientId);
+  google.configureGoogle(settings.googleClientId, Boolean(settings.authServer));
   if (!settings.googleClientId) {
     openSettings();
     return;
@@ -609,7 +622,7 @@ function connect(calendar = false, choose = false) {
 async function recover() {
   for (const draft of await store.all('drafts')) {
     const revision = makeRevision(draft.entry, draft.parents);
-    await store.commitRevision(revision);
+    await store.replaceCurrent(revision);
   }
 }
 function setView(next) {
@@ -695,6 +708,11 @@ $('#entry-date').onchange = (e) => {
 $('#new-entry').onclick = $('#bottom-new').onclick = () => task(() => openEntry(null, localDate()));
 $('#quick-entry').onclick = () => task(() => openEntry());
 $('#records').onclick = (e) => {
+  const remove = e.target.closest('[data-delete-entry]');
+  if (remove) {
+    task(() => deleteEntry(remove.dataset.deleteEntry));
+    return;
+  }
   const button = e.target.closest('[data-entry]');
   if (button) task(() => openEntry(button.dataset.entry));
   if (e.target.closest('#empty-new')) task(() => openEntry());
@@ -709,11 +727,11 @@ function requestClose() {
 }
 $('#editor-form').onsubmit = (e) => {
   e.preventDefault();
-  requestClose();
+  if (dirty) task(() => save(true, true));
 };
 $('#save').onclick = (e) => {
   e.preventDefault();
-  requestClose();
+  if (dirty) task(() => save(true, true));
 };
 $('#close-editor').onclick = requestClose;
 $('#editor-dialog').addEventListener('cancel', (e) => {
@@ -726,7 +744,8 @@ $('#pin-entry').onclick = () => {
   fillEditor();
 };
 $('#archive-entry').onclick = () => {
-  entry.archived = !entry.archived;
+  entry.deletedAt = entry.deletedAt ? '' : new Date().toISOString();
+  entry.archived = Boolean(entry.deletedAt);
   changed();
   fillEditor();
 };
@@ -1009,68 +1028,6 @@ $('#disconnect').onclick = () =>
     $('#sheet-options').hidden = true;
     $('#sheet-select').innerHTML = '';
   });
-$('#review-conflict').onclick = () =>
-  task(async () => {
-    const group = groups.find((g) => g.latest.entry.id === entry.id),
-      versions = [];
-    for (const r of group.heads) versions.push(await hydrate(r));
-    small(
-      '두 기기의 기록 비교',
-      versions
-        .map(
-          (r, i) =>
-            `<p>${escape(new Date(r.savedAt).toLocaleString('ko-KR'))}</p><h3>${escape(r.entry.title)}</h3><pre>${escape(r.entry.body)}</pre><button class="button" data-open-version="${i}">이 기록에서 이어 쓰기</button>`,
-        )
-        .join('') +
-        '<p>합치면 본문을 모두 남깁니다. 같은 추가 항목의 서로 다른 값도 보존합니다.</p><button id="merge" class="primary">두 기록 합치기</button>',
-    );
-    $('#small-body').onclick = (e) => {
-      const b = e.target.closest('[data-open-version]');
-      if (b)
-        task(async () => {
-          await save(false);
-          const r = versions[Number(b.dataset.openVersion)];
-          entry = structuredClone(r.entry);
-          parents = [r.id];
-          activeRevision = r.id;
-          fillEditor();
-          $('#small-dialog').close();
-        });
-    };
-    $('#merge').onclick = () =>
-      task(async () => {
-        entry = structuredClone(versions[0].entry);
-        entry.body = [...new Set(versions.map((r) => r.entry.body))].join(
-          '\n\n--- 다른 기기의 기록 ---\n\n',
-        );
-        entry.tags = [...new Set(versions.flatMap((r) => r.entry.tags))];
-        entry.images = [
-          ...new Map(versions.flatMap((r) => r.entry.images).map((i) => [i.id, i])).values(),
-        ];
-        entry.fields = [
-          ...new Map(
-            versions
-              .flatMap((r) => r.entry.fields || [])
-              .map((f) => [JSON.stringify([f.id, f.value]), f]),
-          ).values(),
-        ];
-        const events = new Map();
-        for (const r of versions)
-          for (const event of r.entry.events) {
-            const old = events.get(event.key);
-            events.set(
-              event.key,
-              old ? { ...old, note: [...new Set([old.note, event.note])].join('\n\n') } : event,
-            );
-          }
-        entry.events = [...events.values()];
-        parents = versions.map((r) => r.id);
-        dirty = true;
-        await save();
-        fillEditor();
-        $('#small-dialog').close();
-      });
-  });
 $('#import').onclick = () => $('#import-input').click();
 $('#import-input').onchange = () =>
   task(async () => {
@@ -1124,25 +1081,24 @@ $('#move-local').onclick = () =>
     await save();
     toast('연결 전 기록을 이 계정에 가져왔습니다.');
   });
-window.addEventListener('online', () => task(save));
+async function resumeConnection() {
+  if (account && settings.authServer && !google.connected()) await google.restoreSession();
+  await save();
+  await refresh();
+}
+window.addEventListener('online', () => task(resumeConnection));
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && Date.now() - lastRefresh > 15000)
-    task(async () => {
-      await save();
-      await refresh();
-    });
+    task(resumeConnection);
 });
 setInterval(() => {
   connection();
   if (
     document.visibilityState === 'visible' &&
-    google.connected() &&
+    (google.connected() || (account && settings.authServer)) &&
     Date.now() - lastRefresh > 20000
   )
-    task(async () => {
-      await save();
-      await refresh();
-    });
+    task(resumeConnection);
 }, 25000);
 window.addEventListener('beforeunload', (e) => {
   if (dirty || busy) {
@@ -1154,7 +1110,7 @@ document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   if (e.key.toLowerCase() === 's' && entry) {
     e.preventDefault();
-    task(() => save());
+    task(() => save(true, true));
   }
   if (e.key.toLowerCase() === 'k' && !$('#editor-dialog').open) {
     e.preventDefault();
@@ -1165,8 +1121,8 @@ async function start() {
   const config = await fetch('/config.json')
     .then((r) => r.json())
     .catch(() => ({}));
-  settings = { ...config, ...settings };
-  google.configureGoogle(settings.googleClientId);
+  settings = { ...config, ...settings, authServer: Boolean(config.authServer) };
+  google.configureGoogle(settings.googleClientId, Boolean(settings.authServer));
   await store.openStore(owner());
   await recover();
   definitions = settings.definitions?.[account?.permissionId || 'local'] || [];
@@ -1183,5 +1139,71 @@ async function start() {
   locks(false);
   connection();
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  if (account)
+    task(async () => {
+      if (await google.restoreSession()) {
+        const identity = await google.identity();
+        if (identity.permissionId !== account.permissionId)
+          throw new Error('Google 계정이 달라 다시 연결해야 합니다.');
+        const files = await findSheets();
+        const file =
+          files.find((f) => f.id === settings.sheets?.[account.permissionId]) ||
+          (files.length === 1 ? files[0] : null);
+        if (file) {
+          if (file.parents?.[0]) {
+            settings.sheetFolders ||= {};
+            settings.sheetFolders[file.id] = file.parents[0];
+          }
+          await selectRepository(file.id);
+        }
+      }
+    });
 }
 start().catch((error) => toast(`일기장을 열지 못했습니다: ${error.message}`, true));
+
+async function deleteEntry(id) {
+  const group = groups.find((g) => g.latest.entry.id === id);
+  if (!group) return;
+  const r = await hydrate(group.latest);
+  const e = structuredClone(r.entry);
+  e.deletedAt = e.deletedAt ? '' : new Date().toISOString();
+  e.archived = Boolean(e.deletedAt);
+  await store.replaceCurrent({
+    ...makeRevision(e, [r.id]),
+    remoteKnown: Boolean(r.sheetSaved || r.remoteKnown),
+  });
+  await load();
+  await save();
+  toast(e.deletedAt ? '휴지통으로 이동했습니다.' : '일기를 복원했습니다.');
+}
+async function purgeTrash(ask = true) {
+  const days = repository?.retentionDays ?? settings.trashDays ?? 30;
+  if (
+    ask &&
+    !window.confirm(`${days}일 이상 지난 휴지통 기록을 완전 삭제할까요? 복원할 수 없습니다.`)
+  )
+    return;
+  let ids;
+  if (repository) {
+    if (!google.connected()) throw new Error('완전 삭제하려면 Google에 연결해주세요.');
+    ids = await repository.purge(days);
+  } else ids = groups.filter((g) => expired(g.latest.entry, days)).map((g) => g.latest.entry.id);
+  for (const r of await store.all('revisions'))
+    if (ids.includes(r.entry.id)) await store.remove('revisions', r.id);
+  for (const d of await store.all('drafts'))
+    if (ids.includes(d.entry.id)) await store.remove('drafts', d.id);
+  await load();
+  if (repository) await refresh();
+  if (ask) toast(`${ids.length}개 일기를 완전 삭제했습니다.`);
+}
+$('#save-retention').onclick = () =>
+  task(async () => {
+    const days = Number($('#trash-days').value);
+    if (account && (!repository || !google.connected()))
+      throw new Error('Google에 연결한 후 기간을 설정해주세요.');
+    if (repository) await repository.saveRetention(days);
+    settings.trashDays = days;
+    persistSettings();
+    toast('휴지통 보관 기간을 저장했습니다. 다음 연결부터 기간이 지난 기록을 완전 삭제합니다.');
+  });
+$('#purge-trash').onclick = () => task(() => purgeTrash(true));

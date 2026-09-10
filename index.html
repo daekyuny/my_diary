@@ -35,7 +35,7 @@
         ><button data-collection="pinned" class="nav-item">
           <span data-icon="pin"></span>고정한 기록</button
         ><button data-collection="archive" class="nav-item">
-          <span data-icon="archive"></span>보관함
+          <span data-icon="archive"></span>휴지통
         </button>
       </nav>
       <div class="sidebar-tags">
@@ -122,7 +122,7 @@
         <div class="collection-tabs mobile-only">
           <button data-collection="journal" class="active">모든 기록</button
           ><button data-collection="pinned">고정</button
-          ><button data-collection="archive">보관함</button>
+          ><button data-collection="archive">휴지통</button>
         </div>
         <div class="filters">
           <div class="filter-left">
@@ -166,21 +166,7 @@
     </nav>
     <dialog id="editor-dialog" class="editor-dialog">
       <form id="editor-form">
-        <header class="editor-toolbar">
-          <button id="close-editor" type="button" aria-label="기록 목록으로">
-            <span data-icon="back"></span><span>기록 목록</span></button
-          ><span id="save-state" role="status">새 기록</span
-          ><button id="save" class="primary" type="submit">
-            완료<span data-icon="check"></span>
-          </button>
-        </header>
-        <div id="conflict" class="conflict" hidden>
-          <strong>다른 기기에서 쓴 기록도 있어요.</strong>
-          <p>
-            각 내용을 확인한 뒤 하나로 합칠 수 있습니다. 어느 기록도 자동으로 덮어쓰지 않습니다.
-          </p>
-          <button id="review-conflict" type="button">기록 비교하기</button>
-        </div>
+        <header class="editor-toolbar"><span id="save-state" role="status">새 기록</span></header>
         <div class="editor-paper">
           <div class="editor-date-row">
             <label class="editor-date"
@@ -241,8 +227,9 @@
         <footer class="editor-footer">
           <button id="add-photo" type="button"><span data-icon="photo"></span>사진</button
           ><button id="archive-entry" type="button">
-            <span data-icon="archive"></span><span>보관하기</span></button
-          ><span id="word-count">0자</span><span class="saved-dot"></span>
+            <span data-icon="archive"></span><span>삭제하기</span></button
+          ><span id="word-count">0자</span><button id="close-editor" type="button">닫기</button
+          ><button id="save" class="primary" type="submit" disabled>저장</button>
         </footer>
       </form>
     </dialog>
@@ -299,6 +286,26 @@
           </div>
           <p class="muted">일기에 자주 기록할 항목을 정하세요. 숨긴 항목의 과거 값은 보존됩니다.</p>
           <div id="definitions"></div>
+        </section>
+        <section>
+          <h3>휴지통 관리</h3>
+          <label class="form-label"
+            >삭제 후 보관 기간<select id="trash-days">
+              <option value="0">0일 (즉시 정리 대상)</option>
+              <option value="7">7일</option>
+              <option value="30" selected>30일</option>
+              <option value="90">90일</option>
+              <option value="365">1년</option>
+            </select></label
+          >
+          <p class="muted">
+            다음 Google 연결 때 기간이 지난 기록을 완전 삭제합니다. 지금 정리할 수도 있습니다. 완전
+            삭제 전에는 휴지통에서 복원할 수 있습니다.
+          </p>
+          <div class="settings-actions">
+            <button id="save-retention" class="button">기간 저장</button
+            ><button id="purge-trash" class="button">기간 지난 기록 완전 삭제</button>
+          </div>
         </section>
         <section>
           <h3>가져오기와 백업</h3>

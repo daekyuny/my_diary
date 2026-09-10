@@ -64,12 +64,12 @@ export function cards(groups, view, hasFilter = false) {
           : '';
       previous = section;
       const attachments = e.images.length ? `<span>${icon('photo')}${e.images.length}</span>` : '';
-      return `${heading}<button class="record" data-entry="${escape(e.id)}"><span class="record-date"><strong>${view === 'board' ? `${date.getMonth() + 1}월 ${date.getDate()}일` : String(date.getDate()).padStart(2, '0')}</strong><small>${date.toLocaleDateString('ko-KR', { weekday: 'short' })}</small></span><span class="record-content"><span class="record-top"><h2>${escape(e.title || '제목 없는 하루')}</h2>${e.pinned ? `<span class="pin-mark">${icon('pin')}</span>` : ''}</span><p>${escape(e.body.replace(/!\[[^\]]*\]\(diary-image:[^)]+\)/g, '') || '이날의 순간을 남겨보세요.')}</p><span class="record-meta"><span class="record-tags">${e.tags
+      return `${heading}<div class="record-wrap"><button class="record" data-entry="${escape(e.id)}"><span class="record-date"><strong>${view === 'board' ? `${date.getMonth() + 1}월 ${date.getDate()}일` : String(date.getDate()).padStart(2, '0')}</strong><small>${date.toLocaleDateString('ko-KR', { weekday: 'short' })}</small></span><span class="record-content"><span class="record-top"><h2>${escape(e.title || '제목 없는 하루')}</h2>${e.pinned ? `<span class="pin-mark">${icon('pin')}</span>` : ''}</span><p>${escape(e.body.replace(/!\[[^\]]*\]\(diary-image:[^)]+\)/g, '') || '이날의 순간을 남겨보세요.')}</p><span class="record-meta"><span class="record-tags">${e.tags
         .slice(0, 4)
         .map((tag) => `<span>#${escape(tag)}</span>`)
         .join(
           '',
-        )}</span>${attachments}${group.heads.length > 1 ? '<span class="conflicted">다른 기기 수정 확인</span>' : !group.latest.sheetSaved ? '<span class="pending">기기 저장</span>' : ''}</span></span><span class="record-end">${icon('chevron')}</span></button>`;
+        )}</span>${attachments}${group.heads.length > 1 ? '<span class="conflicted">다른 기기 수정 확인</span>' : !group.latest.sheetSaved ? '<span class="pending">기기 저장</span>' : ''}</span></span><span class="record-end">${icon('chevron')}</span></button><button class="record-delete" data-delete-entry="${escape(e.id)}" aria-label="${escape(e.title || '제목 없는 하루')} ${e.deletedAt ? '복원' : '삭제'}">${e.deletedAt ? '복원' : '삭제'}</button></div>`;
     })
     .join('');
 }

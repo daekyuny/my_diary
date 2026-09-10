@@ -1,26 +1,27 @@
 import * as google from '../google.js';
-import { newEntry, validateRevision, entryGroups } from '../model.js';
+import { newEntry, validateRevision } from '../model.js';
+import { entryGroups, expired } from './current.js';
 
 export const TABS = ['일기', '추가항목', '일정', '설정'];
 export const HEADERS = [
   [
-    '수정 ID',
+    '저장 식별자',
     '일기 ID',
-    '이전 수정 ID',
+    '연결 정보',
     '저장 시각',
     '일기 날짜',
     '제목',
     '미리보기',
     '태그',
     '고정',
-    '보관',
+    '삭제 시각',
     '본문 1',
     '본문 2',
     '본문 3',
     '본문 4',
   ],
-  ['수정 ID', '항목', '값'],
-  ['수정 ID', '일정 ID', '일정 데이터'],
+  ['저장 식별자', '항목', '값'],
+  ['저장 식별자', '일정 ID', '일정 데이터'],
   ['이름', '값'],
 ];
 const json = async (path, options) => (await google.request(path, options)).json();
@@ -65,7 +66,7 @@ export function encodeRevision(revision) {
         e.body.slice(0, 160),
         JSON.stringify(e.tags),
         String(Boolean(e.pinned)),
-        String(Boolean(e.archived)),
+        e.deletedAt || '',
         ...chunks,
       ],
     ],
@@ -92,7 +93,8 @@ export function decodeIndex(rows) {
         body: row[6] || '',
         tags: JSON.parse(row[7] || '[]'),
         pinned: row[8] === 'true',
-        archived: row[9] === 'true',
+        archived: Boolean(row[9] && !['true', 'false'].includes(row[9])),
+        deletedAt: row[9] && !['true', 'false'].includes(row[9]) ? row[9] : '',
       },
       row: i + 2,
       sheetSaved: true,
@@ -110,6 +112,8 @@ export class SheetsRepository {
     this.index = [];
     this.cache = new Map();
     this.settings = [];
+    this.retentionDays = 30;
+    this.rawIndex = [];
   }
   get url() {
     return `https://docs.google.com/spreadsheets/d/${this.id}/edit#gid=${this.tabs?.[0] ?? 100}`;
@@ -144,7 +148,10 @@ export class SheetsRepository {
           .map((row) => [row[0], JSON.parse(row[1])]),
       ).values(),
     ];
-    this.index = decodeIndex(rows);
+    this.retentionDays = Number(settings.filter((r) => r[0] === 'trashDays').at(-1)?.[1] ?? 30);
+    this.rawRows = rows;
+    this.rawIndex = rows.flatMap((row, i) => decodeIndex([row]).map((r) => ({ ...r, row: i + 2 })));
+    this.index = entryGroups(this.rawIndex).map((g) => g.latest);
     return this.index;
   }
   async read(revision) {
@@ -196,27 +203,143 @@ export class SheetsRepository {
       }),
     );
   }
+  async write(requests) {
+    if (requests.length)
+      await json(`sheets/v4/spreadsheets/${this.id}:batchUpdate`, post({ requests }));
+    this.cache.clear();
+  }
+  clearRow(tab, row, width) {
+    return {
+      updateCells: {
+        range: {
+          sheetId: this.tabs[tab],
+          startRowIndex: row - 1,
+          endRowIndex: row,
+          startColumnIndex: 0,
+          endColumnIndex: width,
+        },
+        fields: 'userEnteredValue',
+      },
+    };
+  }
+  async compact() {
+    await this.list();
+    await this.write(
+      HEADERS.map((header, i) => ({
+        updateCells: {
+          start: { sheetId: this.tabs[i], rowIndex: 0, columnIndex: 0 },
+          rows: [cells(header)],
+          fields: 'userEnteredValue',
+        },
+      })),
+    );
+    const keep = new Set(this.index.map((r) => r.id));
+    const keepRows = new Set(this.index.map((r) => r.row));
+    const obsolete = this.rawIndex.filter((r) => !keepRows.has(r.row));
+    if (obsolete.length) {
+      const ids = new Set(obsolete.filter((r) => !keep.has(r.id)).map((r) => r.id));
+      const [fields, events] = await this.values(["'추가항목'!A2:C", "'일정'!A2:C"]);
+      const requests = obsolete.map((r) => this.clearRow(0, r.row, 14));
+      [fields, events].forEach((rows, i) =>
+        rows.forEach((r, j) => {
+          if (ids.has(r[0])) requests.push(this.clearRow(i + 1, j + 2, 3));
+        }),
+      );
+      await this.write(requests);
+    }
+    // Only the empty default tab is disposable; never delete a tab containing user data.
+    const meta = await json(`sheets/v4/spreadsheets/${this.id}?fields=sheets.properties`);
+    const defaults = meta.sheets.filter((s) => ['Sheet1', '시트1'].includes(s.properties.title));
+    for (const sheet of defaults) {
+      const [rows] = await this.values([`'${sheet.properties.title}'`]);
+      if (!rows.some((r) => r.some((v) => v !== '' && v != null)))
+        await this.write([{ deleteSheet: { sheetId: sheet.properties.sheetId } }]);
+    }
+    await this.list();
+  }
   async save(revision) {
     if (!this.tabs) await this.prepare();
-    // Recheck before retries. Duplicate acknowledgements are also deduplicated by revision ID.
     await this.list();
-    if (this.index.some((item) => item.id === revision.id)) return;
+    if (this.index.some((r) => r.id === revision.id)) return;
+    const previous = this.rawIndex.filter((r) => r.entry.id === revision.entry.id);
+    if (!previous.length && revision.remoteKnown)
+      throw new Error('이 일기는 다른 기기에서 완전 삭제되었습니다. 다시 저장할 수 없습니다.');
     const data = encodeRevision(revision);
-    const requests = data.flatMap((rows, i) =>
-      rows.length
-        ? [
-            {
-              appendCells: {
-                sheetId: this.tabs[i],
-                rows: rows.map(cells),
-                fields: 'userEnteredValue',
-              },
+    const requests = [];
+    const ids = new Set(previous.map((r) => r.id));
+    const [fields, events] = await this.values(["'추가항목'!A2:C", "'일정'!A2:C"]);
+    const slots = [
+      previous.map((r) => r.row),
+      ...[fields, events].map((rows) => rows.flatMap((r, i) => (ids.has(r[0]) ? [i + 2] : []))),
+    ];
+    data.forEach((rows, tab) => {
+      rows.forEach((row, i) => {
+        if (slots[tab][i])
+          requests.push({
+            updateCells: {
+              start: { sheetId: this.tabs[tab], rowIndex: slots[tab][i] - 1, columnIndex: 0 },
+              rows: [cells(row)],
+              fields: 'userEnteredValue',
             },
-          ]
-        : [],
+          });
+        else
+          requests.push({
+            appendCells: {
+              sheetId: this.tabs[tab],
+              rows: [cells(row)],
+              fields: 'userEnteredValue',
+            },
+          });
+      });
+      for (const row of slots[tab].slice(rows.length))
+        requests.push(this.clearRow(tab, row, tab === 0 ? 14 : 3));
+    });
+    await this.write(requests);
+  }
+  async saveRetention(days) {
+    if (![0, 7, 30, 90, 365].includes(days))
+      throw new Error('올바른 휴지통 보관 기간을 선택해주세요.');
+    await this.write([
+      {
+        appendCells: {
+          sheetId: this.tabs[3],
+          rows: [cells(['trashDays', String(days)])],
+          fields: 'userEnteredValue',
+        },
+      },
+    ]);
+    this.retentionDays = days;
+  }
+  async purge(days) {
+    await this.list();
+    const ids = new Set(this.index.filter((r) => expired(r.entry, days)).map((r) => r.entry.id));
+    const doomed = this.rawIndex.filter((r) => ids.has(r.entry.id));
+    const tokens = new Set(doomed.map((r) => r.id));
+    const [fields, events] = await this.values(["'추가항목'!A2:C", "'일정'!A2:C"]);
+    const photos = (rows) =>
+      rows
+        .filter((r) => r[1] === '@app')
+        .flatMap((r) => JSON.parse(r[2] || '{}').images || [])
+        .map((image) => image.driveId)
+        .filter(Boolean);
+    const shared = new Set(photos(fields.filter((r) => !tokens.has(r[0]))));
+    for (const id of new Set(photos(fields.filter((r) => tokens.has(r[0]))))) {
+      if (!shared.has(id)) {
+        try {
+          await google.request(`drive/v3/files/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        } catch (error) {
+          if (error.status !== 404) throw error;
+        }
+      }
+    }
+    const requests = doomed.map((r) => this.clearRow(0, r.row, 14));
+    [fields, events].forEach((rows, tab) =>
+      rows.forEach((r, i) => {
+        if (tokens.has(r[0])) requests.push(this.clearRow(tab + 1, i + 2, 3));
+      }),
     );
-    await json(`sheets/v4/spreadsheets/${this.id}:batchUpdate`, post({ requests }));
-    this.cache.set(revision.id, { ...revision, sheetSaved: true });
+    await this.write(requests);
+    return [...ids];
   }
 }
 export async function findSheets() {
@@ -272,7 +395,10 @@ export async function createSheet() {
     }),
   );
   await initializeSheet(spreadsheet.id);
-  return new SheetsRepository(spreadsheet.id);
+  const repository = new SheetsRepository(spreadsheet.id);
+  await repository.prepare();
+  await repository.compact();
+  return repository;
 }
 export async function initializeSheet(id) {
   const meta = await json(`sheets/v4/spreadsheets/${id}?fields=sheets.properties`);

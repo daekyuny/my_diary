@@ -7,12 +7,68 @@ let expiresAt = 0;
 let scopes = '';
 let folderId = '';
 let clientId = '';
+let authServer = false;
+let refreshing;
+const SESSION_KEY = 'my-diary-google-access';
 export function useFolder(id) {
   folderId = id;
 }
-export function configureGoogle(id) {
+export function configureGoogle(id, persistent = false) {
   clientId = id;
+  authServer = persistent;
+  if (!token) {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
+      if (
+        saved?.clientId === id &&
+        saved.expiresAt > Date.now() &&
+        (!persistent || saved.authServer === true)
+      ) {
+        ({ token, expiresAt, scopes } = saved);
+      }
+    } catch {}
+  }
 }
+function remember() {
+  try {
+    sessionStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({ clientId, token, expiresAt, scopes, authServer }),
+    );
+  } catch {}
+}
+function accept(response) {
+  token = response.access_token;
+  expiresAt = Date.now() + (response.expires_in - 60) * 1000;
+  scopes = response.scope || scopes;
+  remember();
+}
+async function authCall(action, body = {}) {
+  const response = await fetch(`/auth/${action}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-Diary-Auth': '1' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(30000),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || 'Google 연결을 복원하지 못했습니다.');
+  return result;
+}
+export async function restoreSession() {
+  if (connected()) return true;
+  if (!authServer) return false;
+  refreshing ||= authCall('token')
+    .then((response) => {
+      accept(response);
+      return true;
+    })
+    .finally(() => {
+      refreshing = null;
+    });
+  return refreshing;
+}
+
 export function connected() {
   return Boolean(token) && Date.now() < expiresAt;
 }
@@ -20,6 +76,10 @@ export function hasCalendar() {
   return connected() && scopes.split(' ').includes(CALENDAR_SCOPE);
 }
 export function disconnect() {
+  try {
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch {}
+  if (authServer) authCall('logout').catch(() => {});
   token = '';
   scopes = '';
   folderId = '';
@@ -27,6 +87,7 @@ export function disconnect() {
 }
 
 export function authorize(calendar = false) {
+  if (authServer) return authorizeCode(calendar);
   if (!clientId)
     return Promise.reject(new Error('설정에서 Google OAuth 클라이언트 ID를 입력해주세요.'));
   if (!globalThis.google?.accounts?.oauth2)
@@ -59,6 +120,7 @@ export function authorize(calendar = false) {
           token = response.access_token;
           expiresAt = Date.now() + (response.expires_in - 60) * 1000;
           scopes = response.scope;
+          remember();
           folderId = '';
           resolve();
         },
@@ -73,8 +135,10 @@ export function authorize(calendar = false) {
   });
 }
 
-export async function request(path, options = {}) {
-  if (!connected()) throw new Error('Google 연결이 필요합니다. 초안은 기기에 남아 있습니다.');
+export async function request(path, options = {}, retried = false) {
+  if (!connected()) await restoreSession();
+  if (!connected())
+    throw new Error('Google 연결이 필요합니다. 저장한 기록은 기기에 남아 있습니다.');
   const url = path.startsWith('sheets/')
     ? `https://sheets.googleapis.com/${path.slice(7)}`
     : `https://www.googleapis.com/${path}`;
@@ -100,14 +164,22 @@ export async function request(path, options = {}) {
   }
 
   if (!response.ok) {
+    if (response.status === 401 && authServer && !retried) {
+      token = '';
+      expiresAt = 0;
+      await restoreSession();
+      return request(path, options, true);
+    }
     if (response.status === 401) {
       disconnect();
       throw new Error('Google 연결이 만료되었습니다. 다시 연결해주세요.');
     }
     const detail = await response.json().catch(() => ({}));
-    throw new Error(
+    const error = new Error(
       `Google 요청 실패 (${response.status}): ${detail.error?.message || '잠시 후 다시 시도해주세요.'}`,
     );
+    error.status = response.status;
+    throw error;
   }
   return response;
 }
@@ -265,4 +337,45 @@ export async function events(calendarId, from, to) {
     pageToken = response.nextPageToken;
   } while (pageToken);
   return items;
+}
+
+function authorizeCode(calendar) {
+  if (!clientId || !globalThis.google?.accounts?.oauth2?.initCodeClient)
+    return Promise.reject(new Error('Google 로그인 모듈을 확인하고 새로고침해주세요.'));
+  return new Promise((resolve, reject) => {
+    let finished = false;
+    const timer = setTimeout(() => {
+      finished = true;
+      reject(new Error('Google 로그인 창을 확인한 뒤 다시 연결해주세요.'));
+    }, 90000);
+    const finish = (error) => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      error ? reject(error) : resolve();
+    };
+    globalThis.google.accounts.oauth2
+      .initCodeClient({
+        client_id: clientId,
+        scope: [DRIVE_SCOPE, ...(calendar ? [CALENDAR_SCOPE] : [])].join(' '),
+        ux_mode: 'popup',
+        prompt: 'consent',
+        callback: (response) => {
+          if (finished) return;
+          if (!response.code || response.error)
+            return finish(new Error('Google 연결이 취소되었습니다.'));
+          authCall('code', { code: response.code })
+            .then((result) => {
+              if (!finished) {
+                accept(result);
+                folderId = '';
+                finish();
+              }
+            })
+            .catch(finish);
+        },
+        error_callback: () => finish(new Error('로그인 창을 열지 못했습니다. 다시 연결해주세요.')),
+      })
+      .requestCode();
+  });
 }

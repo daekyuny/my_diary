@@ -29,6 +29,7 @@ if (config)
       {
         googleClientId: config.googleClientId || '',
         notificationServer: config.notificationServer || '',
+        authServer: Boolean(config.authServer),
       },
       null,
       2,
