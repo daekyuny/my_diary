@@ -53,6 +53,8 @@ test('field settings add, rename and hide definitions while retaining historical
   page,
 }) => {
   await settings(page);
+  await expect(page.locator('#create-sheet')).toBeVisible();
+  await expect(page.locator('#sheet-help')).toContainText('Google 로그인');
   await page.locator('#new-definition').click();
   await page.locator('#definition-name').fill('장소');
   await page.locator('#definition-form button[type=submit]').click();

@@ -119,6 +119,14 @@ function connection() {
     : '연결 전 기록은 이 기기에만 저장됩니다.';
   $('#disconnect').hidden = !account;
   $('#open-sheet').hidden = !repository;
+  $('#create-sheet').hidden = Boolean(repository) || Boolean($('#sheet-select').options.length);
+  $('#sheet-help').textContent = repository
+    ? '연결된 시트가 있습니다. 내 시트 열기에서 저장 위치와 내용을 확인하세요.'
+    : !online
+      ? '새 시트 만들기를 누르면 Google 로그인부터 진행합니다. 로그인 후 기존 시트가 없으면 생성할 수 있습니다.'
+      : $('#sheet-select').options.length
+        ? '기존 시트를 선택해 연결해주세요.'
+        : '아직 시트가 연결되지 않았습니다. 새 My Diary 시트 만들기를 눌러주세요.';
   if (repository) $('#open-sheet').href = repository.url;
   $('#move-local').hidden = !account;
   if (entry)
@@ -936,11 +944,13 @@ $('#sync').onclick = () => {
       toast('최신 기록을 불러왔습니다.');
     });
 };
-$('#create-sheet').onclick = () =>
+$('#create-sheet').onclick = () => {
+  if (!google.connected()) return connect();
   task(async () => {
     repository = await createSheet();
     await selectRepository(repository.id);
   });
+};
 $('#select-sheet').onclick = () => task(() => selectRepository($('#sheet-select').value));
 $('#repair-sheet').onclick = () =>
   task(async () => {
@@ -964,6 +974,7 @@ $('#disconnect').onclick = () =>
     await load();
     renderDefinitions();
     $('#sheet-options').hidden = true;
+    $('#sheet-select').innerHTML = '';
   });
 $('#review-conflict').onclick = () =>
   task(async () => {
