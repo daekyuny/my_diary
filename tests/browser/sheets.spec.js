@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 const scope = 'https://www.googleapis.com/auth/drive.file';
+// Route mocked API requests directly; service worker fetches bypass WebKit interception.
 async function mock(context, state) {
   await context.addInitScript((scope) => {
     window.google = {
@@ -108,8 +109,8 @@ test('Sheets creates in My Diary, retries failed writes and makes data available
   browser,
 }) => {
   const state = { exists: false, tabs: {}, failWrites: false },
-    a = await browser.newContext(),
-    b = await browser.newContext();
+    a = await browser.newContext({ serviceWorkers: 'block' }),
+    b = await browser.newContext({ serviceWorkers: 'block' });
   await mock(a, state);
   await mock(b, state);
   try {
@@ -149,8 +150,8 @@ test('simultaneous device edits preserve both branches and field definitions tra
   browser,
 }) => {
   const state = { exists: false, tabs: {}, failWrites: false },
-    a = await browser.newContext(),
-    b = await browser.newContext();
+    a = await browser.newContext({ serviceWorkers: 'block' }),
+    b = await browser.newContext({ serviceWorkers: 'block' });
   await mock(a, state);
   await mock(b, state);
   try {
