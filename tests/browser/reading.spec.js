@@ -4,7 +4,7 @@ import { edit } from './helpers.js';
 test.use({ serviceWorkers: 'block' });
 test.beforeEach(async ({ page }) => {
   await page.route('https://accounts.google.com/**', (route) => route.abort());
-  await page.goto('/');
+  await page.goto('/legacy.html');
   await expect(page.locator('#entry-heading')).not.toBeEmpty();
 });
 

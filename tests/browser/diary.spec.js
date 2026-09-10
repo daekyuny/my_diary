@@ -5,7 +5,7 @@ test.use({ serviceWorkers: 'block' });
 
 test.beforeEach(async ({ page }) => {
   await page.route('https://accounts.google.com/**', (route) => route.abort());
-  await page.goto('/');
+  await page.goto('/legacy.html');
   await expect(page.locator('#entry-heading')).not.toBeEmpty();
 });
 
@@ -81,7 +81,7 @@ test('photo insertion and ZIP export/import preserve image bytes and text', asyn
     );
   const restored = await fresh.newPage();
   await restored.route('https://accounts.google.com/**', (route) => route.abort());
-  await restored.goto('/');
+  await restored.goto('/legacy.html');
   await expect(restored.locator('#entry-heading')).not.toBeEmpty();
   await restored.locator('#import-input').setInputFiles(file);
   await expect(restored.locator('#toast')).toContainText('가져왔습니다');
@@ -136,6 +136,8 @@ test('weather is saved for the chosen diary date and location', async ({ page })
 });
 
 test('unconfigured services show setup and user content never executes HTML', async ({ page }) => {
+  await page.route('**/config.json', (route) => route.fulfill({ json: {} }));
+  await page.reload();
   await edit(page);
   await page.locator('#entry-body').fill('<img src=x onerror="window.hacked=true">');
   await page.locator('#save').click();

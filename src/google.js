@@ -7,6 +7,9 @@ let expiresAt = 0;
 let scopes = '';
 let folderId = '';
 let clientId = '';
+export function useFolder(id) {
+  folderId = id;
+}
 export function configureGoogle(id) {
   clientId = id;
 }
@@ -57,7 +60,7 @@ export function authorize(calendar = false) {
   });
 }
 
-async function request(path, options = {}) {
+export async function request(path, options = {}) {
   if (!connected()) throw new Error('Google 연결이 필요합니다. 초안은 기기에 남아 있습니다.');
   const response = await fetch(`https://www.googleapis.com/${path}`, {
     ...options,

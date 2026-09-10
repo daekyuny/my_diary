@@ -1,9 +1,13 @@
 import http from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
+import { bundle } from './bundle.mjs';
 import { makeIcons } from './icons.mjs';
 const root = path.resolve(process.argv[2] || '.');
-if (root === process.cwd()) await makeIcons();
+if (root === process.cwd()) {
+  await makeIcons();
+  await bundle();
+}
 const mime = {
   '.html': 'text/html',
   '.js': 'text/javascript',
@@ -19,9 +23,9 @@ const server = http.createServer(async (request, response) => {
     const pathname = decodeURIComponent(url.pathname);
     const allowed =
       pathname === '/' ||
-      /^\/(index\.html|sw\.js|config\.json|manifest\.webmanifest)$/.test(pathname) ||
+      /^\/(index\.html|legacy\.html|sw\.js|config\.json|manifest\.webmanifest)$/.test(pathname) ||
       /^\/(src|assets)\/[\w./-]+$/.test(pathname) ||
-      pathname === '/vendor/fflate.js';
+      ['/vendor/fflate.js', '/vendor/journal-app.js'].includes(pathname);
     if (!allowed || pathname.split('/').some((part) => part.startsWith('.'))) {
       response.writeHead(404);
       response.end('Not found');
@@ -46,6 +50,7 @@ const server = http.createServer(async (request, response) => {
         if (error.code !== 'ENOENT') throw error;
       }
     }
+    if (pathname === '/vendor/journal-app.js' && root === process.cwd()) await bundle();
     if (!(await stat(file)).isFile()) throw new Error('Not a file');
     response.writeHead(200, {
       'Content-Type': mime[path.extname(file)] || 'application/octet-stream',

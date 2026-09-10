@@ -429,7 +429,7 @@ async function openEntry(id, date, edit = false) {
   editing = edit;
   renderList();
   await renderEditor();
-  history.replaceState(null, '', `?date=${entry.date}`);
+  history.replaceState(null, '', `/legacy.html?date=${entry.date}`);
   if (entry.calendarTemplate !== false && google.hasCalendar() && settings.calendarIds?.length)
     await importCalendarDay();
 }

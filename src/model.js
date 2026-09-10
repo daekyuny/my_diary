@@ -40,6 +40,19 @@ export function validateEntry(entry) {
     if (!Array.isArray(entry[field])) throw new Error('일기 목록 형식이 올바르지 않습니다.');
   if (!entry.tags.every((tag) => typeof tag === 'string'))
     throw new Error('태그 형식이 올바르지 않습니다.');
+  for (const field of ['pinned', 'archived'])
+    if (entry[field] !== undefined && typeof entry[field] !== 'boolean')
+      throw new Error('기록 보관 상태가 올바르지 않습니다.');
+  if (
+    entry.mood !== undefined &&
+    !['', 'happy', 'calm', 'grateful', 'tired', 'sad'].includes(entry.mood)
+  )
+    throw new Error('기분 형식이 올바르지 않습니다.');
+  if (
+    entry.color !== undefined &&
+    !['paper', 'sage', 'peach', 'lavender', 'sky'].includes(entry.color)
+  )
+    throw new Error('카드 색상이 올바르지 않습니다.');
   if (
     !entry.images.every(
       (img) =>

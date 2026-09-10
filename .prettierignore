@@ -4,3 +4,5 @@ playwright-report/
 test-results/
 assets/*.png
 package-lock.json
+
+vendor/

@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f7f8f2" />
+    <meta name="description" content="기억하고 싶은 하루의 조각을 내 구글 드라이브에." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="My Diary" />
+    <title>My Diary · 하루의 조각</title>
+    <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/assets/icon-192.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script type="module" src="/src/app.js"></script>
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="/" aria-label="My Diary 홈"
+          ><span class="brand-icon">m<span>·</span></span
+          ><span>my diary<small>하루의 조각</small></span></a
+        >
+        <button id="new-entry" class="primary new-button"><span>＋</span> 오늘 기록하기</button>
+        <nav aria-label="주 메뉴">
+          <button id="show-journal" class="nav-item active">
+            <span>▤</span> 모든 기록 <b id="entry-count">0</b>
+          </button>
+          <button id="open-calendar" class="nav-item"><span>▦</span> 캘린더 연결</button>
+          <button id="open-reminders" class="nav-item"><span>♧</span> 기록 알림</button>
+        </nav>
+        <div class="sidebar-note">
+          <span class="little-star">✳</span>
+          <p>작은 기록이 모여<br />선명한 기억이 되도록.</p>
+        </div>
+        <div class="sidebar-bottom">
+          <button id="export" class="nav-item"><span>↓</span> 내 기록 내보내기</button>
+          <button id="open-settings" class="nav-item"><span>⚙</span> 설정</button>
+          <div class="drive-box">
+            <span class="drive-mark">△</span>
+            <div>
+              <strong id="drive-title">내 Google Drive</strong
+              ><small id="drive-status">연결 전 · 기기에만 저장</small>
+            </div>
+            <button id="connect-google" title="Google Drive 연결" aria-label="Google Drive 연결">
+              ↗
+            </button>
+          </div>
+        </div>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <span class="eyebrow">YOUR DAYS, YOUR WORDS</span>
+            <h1>나의 기록</h1>
+          </div>
+          <div class="top-actions">
+            <span id="today-label"></span
+            ><button id="sync" class="button small">↻ <span>동기화</span></button>
+          </div>
+        </header>
+        <nav class="mobile-navigation" aria-label="모바일 기록 탐색">
+          <button id="mobile-show-list" class="button">
+            전체 기록 <span id="mobile-entry-count">0</span>
+          </button>
+          <button id="mobile-show-entry" class="button">선택한 일기</button>
+        </nav>
+        <div id="connection-banner" class="connection-banner">
+          <span>일기를 내 드라이브에 안전하게 보관하세요.</span
+          ><button id="banner-connect">Google 연결하기 ↗</button>
+        </div>
+        <div class="workspace">
+          <section id="journal-list" class="journal-list" aria-label="일기 목록">
+            <label class="search-box"
+              ><span>⌕</span
+              ><input
+                id="search"
+                type="search"
+                placeholder="이름, 숫자, 기억 검색"
+                aria-label="일기 검색"
+              /><kbd>⌘ K</kbd></label
+            >
+            <div class="view-controls">
+              <label
+                >보기
+                <select id="journal-view" aria-label="기록 보기">
+                  <option value="list">목록</option>
+                  <option value="calendar">월간 캘린더</option>
+                </select></label
+              ><button id="manage-tags" class="text-button">태그 관리</button>
+            </div>
+            <div id="journal-calendar" hidden></div>
+            <div class="filter-line">
+              <select id="tag-filter" aria-label="태그 필터">
+                <option value="">모든 태그</option></select
+              ><select id="sort" aria-label="정렬">
+                <option value="desc">최신 날짜순</option>
+                <option value="asc">오래된 날짜순</option></select
+              ><button id="toggle-dates" class="icon-button" aria-label="기간 필터">▦</button>
+            </div>
+            <div id="date-filters" class="date-filters" hidden>
+              <label>시작일<input id="filter-from" type="date" /></label
+              ><label>종료일<input id="filter-to" type="date" /></label
+              ><button id="clear-filters" class="text-button">초기화</button>
+            </div>
+            <div class="list-caption">
+              <span id="list-caption">차곡차곡 쌓이는 나의 하루</span
+              ><span id="result-count">0</span>
+            </div>
+            <div id="entries" class="entries"></div>
+            <div class="list-footer">나만의 속도로, 한 줄부터.</div>
+          </section>
+          <section id="editor" class="editor" aria-label="일기 작성">
+            <div class="editor-toolbar">
+              <button id="back-list" class="text-button">← 기록 목록</button
+              ><label class="date-control"
+                ><span>▦</span><input id="entry-date" type="date" aria-label="일기 날짜" /></label
+              ><span id="save-state" role="status">아직 작성 전</span
+              ><button id="edit-entry" class="primary" disabled>편집</button
+              ><button id="save" class="primary" hidden>편집 완료</button>
+            </div>
+            <div id="conflict" class="conflict" hidden></div>
+            <div class="paper-heading diary-heading">
+              <span id="entry-weekday" class="eyebrow"></span>
+              <h2 id="entry-heading"></h2>
+              <p>오늘의 작은 순간을 오래 기억할 수 있도록.</p>
+            </div>
+            <section id="preview" class="preview" aria-label="일기 미리보기"></section>
+            <fieldset id="editor-fields" class="editor-fields" disabled hidden>
+              <div class="context-row">
+                <button id="weather-button" class="context-chip">
+                  ☀ <span>그날의 날씨 추가</span> ＋</button
+                ><button id="calendar-button" class="context-chip">
+                  ▦ <span>일정 다시 가져오기</span> ＋
+                </button>
+              </div>
+              <div id="weather-card" hidden></div>
+              <label class="sr-only" for="entry-title">제목</label
+              ><input
+                id="entry-title"
+                class="entry-title"
+                placeholder="어떤 하루였나요?"
+                maxlength="200"
+              />
+              <label class="sr-only" for="entry-body">일기 내용</label
+              ><textarea
+                id="entry-body"
+                placeholder="기억하고 싶은 순간, 이름, 숫자…&#10;완벽한 문장이 아니어도 괜찮아요."
+                spellcheck="false"
+              ></textarea>
+              <div id="image-gallery" class="image-gallery"></div>
+              <section id="schedule-template">
+                <div class="section-toolbar">
+                  <h3>하루 일정</h3>
+                  <button id="add-event" class="text-button" type="button">＋ 일정 추가</button
+                  ><button id="remove-template" class="text-button" type="button">
+                    일정 양식 숨기기
+                  </button>
+                </div>
+                <div id="event-cards" class="event-cards"></div>
+              </section>
+              <button id="restore-template" type="button" class="button" hidden>
+                일정 양식 다시 넣기
+              </button>
+              <div class="editor-bottom">
+                <div id="entry-tag-chips" class="tag-chips"></div>
+                <label class="tag-input"
+                  ><span>＃</span
+                  ><input
+                    id="entry-tags"
+                    placeholder="태그 추가 (쉼표로 구분)"
+                    aria-label="일기 태그"
+                    list="tag-suggestions" /></label
+                ><datalist id="tag-suggestions"></datalist>
+                <div class="attachment-tools">
+                  <button id="add-image" class="text-button" type="button">▧ 사진·그림</button
+                  ><button id="toggle-preview" class="text-button" type="button">
+                    편집 완료 · 미리보기
+                  </button>
+                </div>
+              </div>
+            </fieldset>
+            <footer class="editor-footer">
+              <span id="word-count">0자</span
+              ><span>내가 쓰고, 내가 간직하는 기록 <span class="green-dot"></span></span>
+            </footer>
+          </section>
+        </div>
+      </main>
+    </div>
+    <input
+      id="image-input"
+      type="file"
+      accept="image/jpeg,image/png,image/webp,image/gif"
+      multiple
+      hidden
+    />
+    <input id="import-input" type="file" accept=".zip,application/zip" hidden />
+    <dialog id="dialog">
+      <div class="dialog-head">
+        <h2 id="dialog-title"></h2>
+        <button id="close-dialog" class="icon-button" aria-label="닫기">×</button>
+      </div>
+      <div id="dialog-body"></div>
+    </dialog>
+    <dialog id="photo-dialog" class="photo-dialog">
+      <div class="dialog-head">
+        <h2 id="photo-title">원본 사진</h2>
+        <button id="close-photo" class="icon-button" aria-label="원본 사진 닫기">×</button>
+      </div>
+      <a id="original-photo-link" target="_blank" rel="noopener">원본 새 창에서 보기</a
+      ><img id="original-photo" alt="" />
+    </dialog>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <noscript>이 일기장은 JavaScript가 필요합니다. 브라우저 설정에서 허용해주세요.</noscript>
+  </body>
+</html>

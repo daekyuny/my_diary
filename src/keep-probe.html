@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Google Keep 읽기 전용 연결 테스트</title>
+    <style>
+      body {
+        font:
+          16px/1.8 system-ui,
+          sans-serif;
+        max-width: 760px;
+        margin: 40px auto;
+        padding: 0 20px;
+        color: #283b30;
+        background: #f7f8f2;
+      }
+      h1 {
+        font-size: 25px;
+      }
+      label {
+        display: block;
+        margin-top: 24px;
+      }
+      input {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 12px;
+        font: inherit;
+      }
+      button {
+        padding: 12px 18px;
+        margin: 18px 8px 0 0;
+        font: inherit;
+        cursor: pointer;
+      }
+      pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: white;
+        padding: 20px;
+        border: 1px solid #dce3d4;
+      }
+      code {
+        overflow-wrap: anywhere;
+      }
+      small {
+        display: block;
+      }
+    </style>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script type="module" src="/src/keep-probe.js"></script>
+  </head>
+  <body>
+    <h1>Google Keep 읽기 전용 연결 테스트</h1>
+    <p>
+      개인 Gmail 계정에서 공식 Keep API에 접근할 수 있는지 실제로 확인합니다. 메모 생성·수정·삭제는
+      하지 않습니다.
+    </p>
+    <ol>
+      <li>같은 Google Cloud 프로젝트에서 Google Keep API를 활성화합니다.</li>
+      <li>
+        Google Auth Platform → 클라이언트에서 웹 애플리케이션의 승인된 JavaScript 원본에
+        <code id="origin"></code>을 추가합니다.
+      </li>
+      <li>앱이 테스트 상태이면 대상 → 테스트 사용자에 본인 Gmail을 추가합니다.</li>
+    </ol>
+    <label for="client-id">OAuth 클라이언트 ID</label>
+    <input
+      id="client-id"
+      placeholder="…apps.googleusercontent.com"
+      autocomplete="off"
+      spellcheck="false"
+    />
+    <small>클라이언트 보안 비밀이나 액세스 토큰은 입력하지 않습니다.</small>
+    <button id="test" disabled>Google 로그인 후 읽기 테스트</button>
+    <button id="copy" disabled>결과 복사</button>
+    <pre id="result" role="status">설정을 읽는 중…</pre>
+    <p>
+      Keep 읽기 전용 권한만 요청하며, 조회 응답도 메모 이름 필드 최대 1개로 제한합니다. 결과에는
+      메모 ID·제목·본문·토큰을 넣지 않습니다.
+    </p>
+    <p>
+      로그인 창 안에서 오류가 나면 오류의 ‘세부정보’에서 오류 코드와 설명만 전달해주세요. 창 내부
+      오류는 이 페이지에 전달되지 않을 수 있습니다.
+    </p>
+  </body>
+</html>

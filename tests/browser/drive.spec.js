@@ -105,7 +105,7 @@ async function mockGoogle(page) {
     if (file) return route.fulfill({ body: file.content, contentType: 'text/markdown' });
     throw new Error(`Unexpected Google request: ${route.request().method()} ${url}`);
   });
-  await page.goto('/');
+  await page.goto('/legacy.html');
   await expect(page.locator('#entry-heading')).not.toBeEmpty();
   return state;
 }

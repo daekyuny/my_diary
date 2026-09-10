@@ -2,6 +2,9 @@ const CACHE = 'my-diary-shell-v1';
 const SHELL = [
   '/',
   '/index.html',
+  '/legacy.html',
+  '/vendor/journal-app.js',
+  '/src/journal/styles.css',
   '/src/app.js',
   '/src/model.js',
   '/src/storage.js',
@@ -41,12 +44,17 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   // Only application assets are cached, never OAuth tokens or third-party API responses.
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
+  if (url.pathname === '/src/keep-probe.html') return;
   if (event.request.mode === 'navigate') {
     // Serve HTML and modules from the same version until the next worker activates.
     event.respondWith(
       caches
         .open(CACHE)
-        .then(async (cache) => (await cache.match('/index.html')) || fetch(event.request)),
+        .then(
+          async (cache) =>
+            (await cache.match(url.pathname === '/legacy.html' ? '/legacy.html' : '/index.html')) ||
+            fetch(event.request),
+        ),
     );
     return;
   }

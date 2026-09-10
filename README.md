@@ -1,31 +1,31 @@
-# My Diary · 하루의 조각
+# My Diary · 하루를 모으는 곳
 
-아이폰·아이패드·데스크톱에서 쓰는 개인용 일기 웹앱입니다. 일기와 사진 원본은 **본인 Google Drive**에 저장하며, 앱스토어 등록 없이 홈 화면에 추가할 수 있습니다.
+PC·태블릿·모바일에서 같은 일기를 이어 쓰는 반응형 웹앱입니다. 개인 Google 계정으로 연결하며 **Google Drive의 `My Diary` 폴더 안에 스프레드시트 하나**를 원본 저장소로 사용합니다. PC에 Drive 폴더를 동기화할 필요가 없습니다.
 
-## 첫 버전 기능
+## 작성과 탐색
 
-- 날짜별 작성·수정, 입력 중 기기 초안 저장, 잠시 멈추면 자동 저장
-- **일기 날짜** 기준 정렬, 기간·태그 필터, 이름·숫자·본문·일정 메모 검색
-- Google Drive의 `My Diary` 폴더에 Markdown 수정 버전과 사진 원본 저장
-- JPG/PNG/WebP/GIF 사진·그림 첨부, 본문 삽입, 미리보기
-- Markdown + 원본 이미지 + JSON 전체 버전의 ZIP 내보내기·가져오기
-- 선택한 Google Calendar의 일정 제목·시간·장소를 해당 날짜에 가져오기
-- 일정별 메모와 종료 알림 설정; 원본 일정이 변경되어도 메모 보존
-- 날짜와 도시 또는 현재 위치에 맞는 날씨 저장, 출처·예보/과거 추정 구분
-- 기기별 매일 알림·일정 종료 후 알림, PWA와 오프라인 초안
+- 목록·카드·월간 캘린더 보기, 날짜·태그·본문·추가항목·일정 메모 검색
+- 같은 날짜의 여러 기록, 상단 고정, 보관함과 복원
+- PC 사이드 메뉴와 넓은 편집 창, 모바일 하단 탐색과 전체 화면 편집
+- 입력 중 기기 초안 저장, 입력을 멈추면 저장, Google 연결 시 Sheets에 반영
+- 다른 기기의 변경은 화면에 돌아올 때와 화면이 열린 동안 약 25초 간격으로 확인
+- **설정 → 추가 항목 관리:** 텍스트·숫자·날짜·선택 목록 항목 생성, 이름·입력 방식 수정, 숨김
+- 추가 항목의 내부 ID는 이름 변경 후에도 유지합니다. 숨긴 항목도 과거 일기의 값은 남습니다. 일기에서 항목 제거는 그 일기에만 적용합니다.
+- Google Calendar에서 선택한 날짜의 일정 가져오기, 직접 일정 작성, 일정별 메모
+- 사진 원본 첨부·원본 보기, My Diary ZIP 백업, Google Keep ZIP 가져오기
 
-로컬 실행에는 계정이 필요 없습니다. **실제 Drive·Calendar 연결은 OAuth 설정, 예약 알림은 Worker 배포가 필요**합니다. 실제 계정과 iPhone 푸시 수신은 배포 후 확인해야 합니다.
+로그인 전에는 기기에만 저장합니다. 연결 전 기록은 **설정 → 연결 전 기기 기록 가져오기**로 원하는 계정에 명시적으로 옮깁니다. Google 접근 토큰은 메모리에만 보관하므로 재접속·권한 만료 시 재연결이 필요할 수 있습니다. Docs의 글자 단위 실시간 공동 편집과는 다릅니다.
 
-## 실행과 검증
+## 로컬 실행
 
-Node.js 22 이상을 사용합니다. 프런트엔드는 JavaScript ES modules와 CSS이며, 서버 렌더링이나 유료 데이터베이스가 필요 없습니다.
+Node.js 22 이상:
 
 ```bash
 npm ci
 npm run dev
 ```
 
-`http://localhost:4173`을 엽니다. 처음에는 **기기에만 저장**되며 Drive 저장 완료로 표시하지 않습니다. 로그인 없이 작성, 사진, 필터, 백업을 확인할 수 있습니다.
+`http://localhost:4173`을 엽니다. API 설정이 완료되기 전에도 로컬 기록과 반응형 화면을 사용할 수 있습니다.
 
 ```bash
 npm test
@@ -38,163 +38,86 @@ npm run preview
 git diff --check
 ```
 
-`build`는 `dist/`를 생성하며 `preview`도 4173 포트를 사용합니다. 테스트 캡처는 `artifacts/`, 실패 추적은 `test-results/`에 생성됩니다. 서비스 워커를 통한 오프라인 재접속 테스트는 Playwright 지원 범위에 따라 Chromium에서 실행하고 WebKit에서는 건너뜁니다. 외부 API 모의 테스트는 서비스 워커를 차단해 실제 API로 요청이 나가지 않도록 합니다. WebKit 테스트는 Linux에 시스템 라이브러리가 필요할 수 있습니다: `npx playwright install-deps webkit` (관리자 권한 필요). 브라우저 에뮬레이션은 실제 iPhone 알림 수신 검증을 대체하지 않습니다.
+Linux WebKit 실행에는 시스템 라이브러리가 필요할 수 있습니다. `npx playwright install-deps webkit`으로 설치합니다. `build`는 생성물인 `dist/`를 새로 만들어 정적 호스팅용 파일만 복사합니다. 개발 서버는 새로고침 때 JavaScript 번들을 갱신합니다.
 
-## 일기 읽기와 편집
+## Google 연결 설정
 
-- 날짜나 목록의 일기를 선택하면 미리보기가 열립니다. **편집 → 편집 완료**로 제목·본문·태그·일정을 수정하며, 입력 중 자동 저장은 계속 동작합니다.
-- 기록 목록의 **보기**에서 목록/월간 캘린더를 선택합니다. 월 이동, 날짜 선택, 검색·태그 필터를 함께 쓸 수 있고 같은 날짜의 여러 일기도 각각 선택할 수 있습니다.
-- 사진은 썸네일로 표시하고 누르면 원본 사진을 엽니다. 원본 파일을 축소하거나 덮어쓰지 않습니다.
-- 태그는 편집 화면에서 쉼표로 구분해 입력하고 태그 옆 ×로 제거합니다. **태그 관리**에서 여러 일기의 태그 이름을 바꾸거나 제거할 수 있습니다.
-- Keep에서 변환해 가져온 기록의 `My Diary` 태그는 처음 불러올 때 정리합니다. 본문·사진과 이전 수정 이력은 남고, Google 연결 후 동기화하면 정리한 새 버전도 Drive에 저장됩니다.
-- Google 캘린더 일정은 기본 양식으로 표시합니다. 편집 화면에서 일정마다 제목·시작/종료 시간·장소·내용을 수정하거나 삭제하고, 직접 일정을 추가할 수 있습니다. 미리보기에는 일정 시간·제목·기록한 내용만 표시합니다.
-- **일정 양식 숨기기**로 해당 날짜의 일정 영역을 제거하고 **일정 양식 다시 넣기**로 복구할 수 있습니다. 매일의 미리보기와 편집 화면에 있는 **일정 다시 가져오기**는 삭제했던 Google 일정도 다시 불러옵니다. 자동 동기화에서는 삭제한 일정이 다시 나타나지 않습니다.
-- 일기에서 한 일정 수정·삭제는 Google 캘린더 원본에 반영하지 않습니다. 수정한 항목은 재동기화해도 유지하고 수정하지 않은 항목은 Google의 최신 값으로 갱신합니다. 직접 추가한 일정에는 예약 푸시 알림이 없습니다.
+1. 기존 OAuth 클라이언트가 있는 Google Cloud 프로젝트에서 **Google Sheets API, Google Drive API, Google Calendar API**를 활성화합니다. Calendar는 일정 기능에만 필요합니다.
+2. Google Auth Platform에서 개인 계정은 **External / Testing**으로 설정하고 본인 Gmail을 테스트 사용자로 등록합니다.
+3. 웹 OAuth 클라이언트의 승인된 JavaScript 원본에 `http://localhost:4173`과 배포 주소 `https://daekyuny-diary.web.app`을 추가합니다. 경로는 넣지 않습니다.
+4. 앱의 Google 연결 버튼을 누르고 본인 계정으로 승인합니다.
+5. 처음에는 **새 My Diary 시트 만들기**를 누릅니다. 기존 `My Diary` 폴더에 스프레드시트를 만들고 `일기`, `추가항목`, `일정`, `설정` 탭을 준비합니다. 기존 파일을 삭제하지 않습니다.
+6. 다른 기기에서도 같은 웹앱 주소와 Google 계정으로 연결합니다. 앱이 만든 시트는 Drive의 앱 속성으로 찾으며 하나면 자동 선택합니다. 여러 개면 사용자가 선택합니다.
 
-## Google 연결
+시트 생성 도중 Sheets API 활성화·통신 문제로 초기 설정이 중단되면 재연결 후 **초기 설정 이어서 완료**를 사용합니다. 기존 내용을 덮어쓰지 않고 누락된 필수 탭을 추가합니다.
 
-1. 기존 Firebase에 연결된 Google Cloud 프로젝트 또는 새 프로젝트를 선택합니다.
-2. **Google Drive API**, **Google Calendar API**를 활성화합니다.
-3. Google Auth Platform의 동의 화면을 설정합니다. 개인 계정은 External / Testing으로 시작하고 본인 이메일을 테스트 사용자로 등록합니다.
-4. **웹 애플리케이션 OAuth 클라이언트**를 만듭니다. 승인된 JavaScript 원본에 `http://localhost`, `http://localhost:4173`과 실제 배포 원본(예: `https://YOUR_PROJECT.web.app`)을 각각 추가합니다. 경로는 붙이지 않습니다.
-5. 앱 설정에 `…apps.googleusercontent.com` 형식의 클라이언트 ID를 입력합니다. **Client Secret은 입력하지 않습니다.**
-6. Google 연결 버튼으로 Drive 권한을 허용합니다. 캘린더는 별도로 읽기 권한을 요청합니다.
+Sheets와 사진에는 `drive.file`, 캘린더에는 별도로 `calendar.readonly`를 요청합니다. 앱이 만든 파일만 접근하는 범위이므로 다른 OAuth 앱이 만든 파일을 ID만 입력해 자동 접근할 수는 없습니다. 기존 폴더가 현재 OAuth 앱에 보이지 않으면 같은 이름의 폴더가 새로 만들어질 수 있습니다. 현재 저장소는 이전 일기 앱과 같은 OAuth 클라이언트를 사용합니다.
 
-공개 설정을 배포에 포함하려면 `config.json` 또는 Git에서 제외된 `config.local.json`에 다음 값을 넣습니다. 빌드는 두 공개 값만 복사합니다.
+공개 클라이언트 ID는 `config.json`에 설정했습니다. 필요하면 앱 설정 또는 Git에서 제외된 `config.local.json`에서 바꿀 수 있습니다. **클라이언트 보안 비밀은 사용하지 않습니다.**
 
 ```json
 {
   "googleClientId": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-  "notificationServer": "https://my-diary-notify.YOUR_SUBDOMAIN.workers.dev"
+  "notificationServer": ""
 }
 ```
 
-권한은 `drive.file`과 선택적인 `calendar.readonly`입니다. 전체 Drive 읽기 권한을 요구하지 않습니다. 접근 토큰은 메모리에만 보관하므로 **새로 열었거나 토큰이 만료되면 Google 연결 버튼을 다시 눌러야 할 수 있습니다.** 재연결 전에는 기기에 저장합니다.
+실제 Google 계정의 권한 승인·시트 생성은 사용자 로그인 후 별도 확인이 필요합니다. 자동 테스트는 외부 API를 모의하며 실제 계정의 자료를 사용하지 않습니다.
 
-계정별 브라우저 저장소를 분리합니다. 로그인 전 기록은 **설정 → 연결 전 초안 가져오기**로 명시적으로 옮깁니다. 다른 계정으로 옮길 때는 연결 해제 후 재연결하고 ZIP을 가져옵니다. 기기 간에는 같은 OAuth 클라이언트와 배포 URL을 사용하세요. 새 OAuth 앱이 기존 파일에 접근하지 못하면 ZIP을 가져와 새 앱 소유 파일로 저장할 수 있습니다.
+참고: [Sheets 권한](https://developers.google.com/workspace/sheets/api/scopes), [Google 토큰 모델](https://developers.google.com/identity/oauth2/web/guides/use-token-model), [Calendar 일정 조회](https://developers.google.com/workspace/calendar/api/v3/reference/events/list)
 
-참고: [Google 토큰 모델](https://developers.google.com/identity/oauth2/web/guides/use-token-model), [Drive 권한](https://developers.google.com/workspace/drive/api/guides/api-specific-auth), [Calendar 조회](https://developers.google.com/workspace/calendar/api/v3/reference/events/list)
+## 저장 구조와 충돌 처리
 
-## Firebase 무료 배포
+| 탭       | 저장 내용                                                                                   |
+| -------- | ------------------------------------------------------------------------------------------- |
+| 일기     | 수정 ID, 일기 ID, 이전 수정 ID, 저장 시각, 날짜, 제목, 미리보기, 태그, 고정·보관 상태, 본문 |
+| 추가항목 | 수정 ID에 연결된 사용자 정의 항목 값, 사진·이전 자료의 메타데이터                           |
+| 일정     | 수정 ID에 연결된 Google·직접 작성 일정과 메모                                               |
+| 설정     | 형식 식별자와 사용자 정의 항목 설정                                                         |
 
-**Firebase Hosting의 Spark 요금제**를 사용합니다. App Hosting, Cloud Functions, Firebase Storage는 사용하지 않습니다. 일기는 Firestore가 아닌 **개인 Google Drive**에 저장합니다.
+Sheets에는 일반 DB의 조건부 갱신 트랜잭션이 없으므로, **수정할 때 새 행을 추가하고 이전 수정 ID로 연결**합니다. 앱 화면은 각 일기의 최신 상태만 보여줍니다. 여러 기기가 같은 이전 기록을 수정해도 두 내용을 남기고, 비교 후 합칠 수 있습니다. `일기`, `추가항목`, `일정` 추가는 하나의 `batchUpdate`에 묶습니다. 재시도 시 수정 ID를 확인하고, 응답 유실로 중복 행이 생겨도 동일 ID는 화면에서 하나로 취급합니다.
+
+따라서 시트를 직접 열면 같은 일기의 수정 이력이 여러 행으로 보입니다. **새 기록·항목 변경은 웹앱에서 수행하는 것을 기본으로 합니다.** 행 전체의 정렬은 다시 읽을 때 ID로 찾지만, 셀 일부만 정렬하거나 수정 ID·연결 정보를 직접 고치면 읽기와 충돌 판단이 깨질 수 있습니다. 설정의 동시 변경은 마지막에 추가된 설정을 적용하고 앞선 값은 시트에 보존합니다.
+
+목록은 제목·날짜·미리보기 등의 열만 읽고, 본문은 기록을 열거나 검색할 때 불러와 기기에 캐시합니다. 전체 본문 검색·백업·첫 가져오기는 데이터량에 비례해 느려질 수 있습니다. 현재 전체 검색은 미수신 본문을 순서대로 조회하며 API 한도에 도달하면 오류를 표시합니다. 대량 자료의 검색 인덱스·진행 재개·이력 압축은 후속 개선 대상입니다. 편집 이력이 누적되므로 장기 용량은 일기 편수뿐 아니라 수정 횟수도 고려해야 합니다.
+
+본문은 편당 12만 자까지, 셀당 3만 자씩 네 칸으로 나누어 저장합니다. 입력은 수식이 아닌 문자열로 저장합니다. 사용자 항목·일정 단일 값은 45,000자 이내입니다. 서버 저장에 실패하면 로컬 기록과 원본 사진을 유지하며 저장 완료로 표시하지 않습니다.
+
+참고: [Sheets 일괄 수정](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/batchUpdate), [API 한도](https://developers.google.com/workspace/sheets/api/limits)
+
+## 사진과 기존 데이터
+
+사진 원본은 Google Drive의 `My Diary/attachments`에 저장하고 시트에는 파일 ID를 연결합니다. JPG·PNG·WebP·GIF, 사진당 10MB까지 지원합니다. 첨부 해제·보관은 Drive 원본 파일을 삭제하지 않습니다.
+
+`keep-data.zip`은 **나중에 가져올 개인 원본**입니다. 프로젝트 루트에 보존하며 Git·개발 서버·배포 대상에서 제외합니다. 이 파일을 자동으로 읽거나 가져오지 않습니다.
+
+앱 설정에서 ZIP을 직접 선택하면 다음을 지원합니다.
+
+- Google Takeout Keep ZIP: `My Diary` 라벨이 있고 휴지통에 없는 메모를 가져옵니다. 제목 앞의 `YYYY-MM-DD` 날짜가 있으면 사용하고, 없으면 생성일을 사용합니다. 태그·지원하는 사진·고정·보관 상태를 보존합니다.
+- My Diary ZIP: 수정 이력과 사진 원본을 가져옵니다.
+- 같은 Keep 원본을 다시 가져와도 경로·생성 시각 기반 ID로 중복 기록을 막습니다. 이미 가져온 메모를 이후 변경한 ZIP의 갱신 병합은 별도 기능입니다.
+- 지원하지 않는 첨부나 원본 누락은 가져오기 전에 오류로 알립니다. 입력 ZIP 100MB, 압축 해제 총 300MB까지 지원합니다.
+- 백업은 기기에 알려진 모든 수정과 원본 사진을 포함합니다. 전체 최신 자료를 원하면 먼저 Google에 연결하고 새로고침합니다. 아직 본문·사진을 받지 못했으면 불완전한 백업을 성공으로 내보내지 않습니다.
+
+이전 Drive 버전은 `/legacy.html`에 보존되어 있습니다. [이전 버전 사용 안내](docs/legacy-drive.md)를 참고하세요. 해당 화면의 Drive 동기화는 사용자가 직접 실행한 경우에만 수행됩니다. 새 앱의 저장은 Sheets를 사용합니다. 기존 Drive 파일 삭제는 사용자가 직접 진행합니다.
+
+## 개발 구조와 배포
+
+- `src/journal/app.js`: 화면 동작과 저장·연결 흐름
+- `src/journal/views.js`, `icons.js`, `styles.css`: 목록·카드·캘린더, 반응형 화면
+- `src/journal/sheets.js`: Sheets 스키마·원본 조회·행 추가·공통 항목 설정
+- `src/journal/backup.js`: Keep/My Diary ZIP 가져오기와 백업
+- `src/model.js`, `storage.js`, `google.js`, `sync.js`: 공통 모델·IndexedDB·Google API·사진 조회
+- `src/app.js`, `legacy.html`: 이전 Drive 일기 앱
+- `scripts/`: esbuild 번들·개발 서버·정적 빌드
+- `tests/`: 모델·ZIP·API 요청 테스트와 Playwright PC·모바일 테스트
+- `artifacts/journal-*.png`: 개인 데이터 없는 예시 기록의 화면 캡처
+
+현재 배포 대상은 `burndown-studio` 프로젝트의 `daekyuny-diary` 사이트입니다. Firebase는 Hosting에만 사용하며 Firestore·Firebase Storage는 필요 없습니다. 기존 `.github/workflows/deploy.yml`은 검사 후 `main` push 시 배포합니다. 이번 작업은 로컬 구현이며 실제 사이트 배포는 별도입니다.
 
 ```bash
 npm run build
-npx firebase-tools login
-npx firebase-tools hosting:sites:create YOUR_DIARY_SITE_ID --project YOUR_PROJECT_ID
-npx firebase-tools target:apply hosting diary YOUR_DIARY_SITE_ID --project YOUR_PROJECT_ID
-npx firebase-tools deploy --only hosting:diary --project YOUR_PROJECT_ID
+npx firebase-tools deploy --only hosting:diary --project burndown-studio
 ```
 
-프로젝트 ID와 일기용 사이트 ID를 실제 값으로 바꿉니다. 기존 프로젝트에 별도 Hosting 사이트를 추가하고 `diary` 대상으로 연결합니다. 이미 일기용 사이트를 만들었다면 `hosting:sites:create`는 생략합니다. 기존 웹사이트의 사이트 ID를 사용하지 마세요. `dist/`만 배포하며 저장소 루트나 비밀 파일은 배포하지 않습니다. 서비스 코드가 공개되어도 Google Drive의 일기·사진은 비공개입니다. 다른 정적 호스팅도 빌드 명령 `npm run build`, 출력 폴더 `dist`로 배포할 수 있습니다. 루트 경로(`/`) 배포를 전제로 합니다.
-
-### GitHub Actions 자동 배포
-
-이 저장소의 배포 대상은 `burndown-studio` 프로젝트의 일기 전용 `daekyuny-diary` 사이트입니다. `.firebaserc`에서 `diary` 대상으로 연결하며, 배포 주소는 `https://daekyuny-diary.web.app`입니다. OAuth 클라이언트의 승인된 JavaScript 원본에도 이 주소를 추가합니다.
-
-`.github/workflows/deploy.yml`은 PR에서 기본 테스트, 코드 형식, Chromium·모바일 Chromium·WebKit 테스트와 빌드를 검사합니다. `main` push 또는 Actions의 **Run workflow** 실행 시 같은 검사를 통과한 뒤 Firebase Hosting의 실제 사이트에 `dist/`를 배포합니다. 알림 Worker는 별도 배포합니다.
-
-저장소 **Settings → Secrets and variables → Actions**에 다음을 등록합니다.
-
-| 종류     | 이름                       | 값                                                                         |
-| -------- | -------------------------- | -------------------------------------------------------------------------- |
-| Variable | `FIREBASE_PROJECT_ID`      | 배포 대상 Firebase 프로젝트 ID (필수)                                      |
-| Variable | `FIREBASE_HOSTING_SITE`    | 별도로 만든 일기용 Hosting 사이트 ID (필수)                                |
-| Secret   | `FIREBASE_SERVICE_ACCOUNT` | 해당 프로젝트에 Hosting 배포 권한을 가진 서비스 계정의 JSON 키 전체 (필수) |
-| Variable | `GOOGLE_CLIENT_ID`         | 로컬 테스트에 사용한 OAuth 웹 클라이언트 ID (선택)                         |
-| Variable | `NOTIFICATION_SERVER`      | 배포한 알림 Worker URL (선택)                                              |
-
-서비스 계정은 [Firebase 공식 Action의 설정 안내](https://github.com/FirebaseExtended/action-hosting-deploy/blob/main/docs/service-account.md)에 따라 준비합니다. JSON 키는 GitHub Secret에 직접 등록하며 저장소에 커밋하지 않습니다. 필수 설정이 없으면 배포 단계가 오류 메시지와 함께 중단됩니다. 선택 변수는 비어 있으면 `config.json` 값을 사용하며, 클라이언트 ID는 배포 후 앱 설정에서도 입력할 수 있습니다.
-
-배포 전에 기존 프로젝트 안에 일기용 Hosting 사이트를 별도로 만듭니다. Actions는 `FIREBASE_HOSTING_SITE`를 `diary` 대상으로 연결해 해당 사이트만 배포하며, 이 값이 없으면 배포를 중단합니다. [Firebase 다중 사이트 안내](https://firebase.google.com/docs/hosting/multisites)
-
-OAuth 클라이언트의 승인된 JavaScript 원본에 일기 사이트 주소(예: `https://YOUR_DIARY_SITE_ID.web.app`)를 추가합니다. 기존 로컬 주소도 유지합니다. 배포 진행 상황과 결과는 저장소 **Actions → Test and deploy Firebase Hosting**에서 확인합니다. [Firebase GitHub 연동 안내](https://firebase.google.com/docs/hosting/github-integration)
-
-## 무료 예약 알림 서버
-
-**Cloudflare Workers Free + KV + Cron**을 사용합니다. 일기 본문·사진·Google 토큰을 서버로 보내지 않습니다. 서버에는 기기의 Web Push 구독 정보와 알림 시각, 일정 식별자·날짜만 저장하며 알림 문구도 일반 문구입니다.
-
-1. Cloudflare 무료 계정을 만들고 `npx wrangler login`으로 로그인합니다.
-2. KV와 비밀 키 파일을 준비합니다.
-
-```bash
-npx wrangler kv namespace create REMINDERS --config worker/wrangler.toml
-node scripts/generate-push-keys.mjs
-```
-
-3. 출력된 namespace ID를 `worker/wrangler.toml`의 `id`에 넣습니다. `APP_ORIGIN`은 실제 Firebase 원본(마지막 `/` 없이), `VAPID_SUBJECT`는 본인 연락 이메일(`mailto:...`)로 바꿉니다.
-4. 생성된 **`worker/.dev.vars`는 비밀 파일**입니다. 생성 스크립트는 기존 키를 덮어쓰지 않습니다. 다음 명령의 입력 프롬프트에 파일의 해당 값을 각각 붙여 넣습니다.
-
-```bash
-npx wrangler secret put VAPID_PUBLIC_KEY --config worker/wrangler.toml
-npx wrangler secret put VAPID_PRIVATE_KEY --config worker/wrangler.toml
-npx wrangler secret put OWNER_TOKEN --config worker/wrangler.toml
-npx wrangler deploy --config worker/wrangler.toml
-```
-
-5. 앱 **설정 → 알림 설정**에 Worker URL과 `OWNER_TOKEN`을 넣습니다. `OWNER_TOKEN`과 VAPID 비밀 키는 공유하지 않습니다. 연결 키는 본인 기기에 저장되며 ZIP에는 포함되지 않습니다.
-6. 아이폰·아이패드 Safari의 **공유 → 홈 화면에 추가** 후 그 아이콘으로 실행합니다. iOS/iPadOS 16.4 이상에서 알림을 허용하고 테스트 알림을 확인합니다.
-
-알림 동작과 한계:
-
-- 매일 알림은 설정 당시 기기 시간대를 사용합니다. 시간대 변경 시 설정을 다시 저장합니다.
-- 일정 알림은 동기화 시 **앞으로 14일분**을 예약합니다. 변경·취소 후 앱에서 다시 동기화해야 반영됩니다. 종일 일정은 제외합니다.
-- 무료 KV list 사용량을 고려해 **5분 간격**으로 확인합니다. 최대 약 5분의 처리 지연과 기기·네트워크 지연이 있을 수 있습니다. 15분 이상 지난 알림은 몰아서 보내지 않습니다.
-- 기기 알림을 끌 때 서버 구독부터 삭제합니다. 네트워크 오류 시 해제가 완료됐다고 표시하지 않습니다.
-- 단일 사용자·소수 기기용입니다. KV는 최종 일관성 저장소이므로 설정 반영 지연과 드문 중복 알림 가능성이 있습니다. 일기 보존과는 무관합니다.
-- Web Push 암호화는 자동 테스트로 검증합니다. 무료 Worker의 실제 CPU 사용량, 외부 푸시 서비스 수신은 배포 로그와 실제 기기로 확인해야 합니다.
-
-참고: [Worker 무료 한도](https://developers.cloudflare.com/workers/platform/limits/), [KV 가격](https://developers.cloudflare.com/kv/platform/pricing/), [Apple Web Push](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)
-
-## 데이터 보존과 이식
-
-```text
-My Diary/
-  2026-09-09_<수정 버전 UUID>.md
-  2026-09-09_<다음 수정 버전 UUID>.md
-  attachments/
-    <이미지 UUID>.jpg
-```
-
-각 수정은 새 파일로 저장합니다. 앞부분에 JSON 형식의 YAML front matter가 있고 뒤에는 일반 Markdown 본문이 있습니다. `schemaVersion`, `id`, `parents`, `savedAt`, `entry`로 구성되며, `entry`에는 날짜·제목·본문·태그·일정 메모·날씨·이미지 정보가 들어갑니다.
-
-**이미지 원본을 먼저 올리고 일기 업로드가 성공한 후에만 저장 완료로 표시**합니다. 인터넷 단절·권한 만료·용량 부족 시 기기 초안/동기화 대기를 유지합니다. 실패 후 재시도는 파일의 고유 ID로 중복 여부를 확인합니다.
-
-여러 기기가 같은 이전 버전을 수정하면 두 버전 모두 남습니다. 비교 후 본문·일정 메모·사진·태그를 합칠 수 있으며, 제목·날씨는 최근 버전을 선택합니다. 이전 자료도 버전 파일과 전체 백업에 보존합니다. 수정 버전을 자동 삭제하지 않으므로 Drive 공간 사용량은 누적됩니다.
-
-ZIP 백업 구성:
-
-```text
-diary.json                        # 전체 버전, 복원용
-2026-09-09_<일기 UUID>.md          # 최신 본문, 다른 앱으로 이식
-attachments/                     # 사진 원본
-history/                         # 충돌 포함 모든 수정 버전
-README.txt
-```
-
-백업에는 **현재 기기에 불러온 기록**이 들어갑니다. 전체 최신 자료를 내보내려면 먼저 동기화합니다. 사진이 로컬에 없으면 Drive에서 내려받으며, 실패하면 불완전한 백업을 성공으로 내보내지 않습니다. 가져오기는 기존 버전을 덮어쓰지 않으며, 다른 계정의 파일 ID는 제거합니다.
-
-첫 버전 제한: ZIP 가져오기 100MB, 압축 해제 총 250MB, 이미지 한 장 10MB. HEIC와 SVG는 받지 않습니다. 큰 사진 모음의 스트리밍 백업은 후속 개선 대상입니다. Google Keep 직접 가져오기는 구현 범위에 포함하지 않았습니다.
-
-## 날씨와 위치
-
-날짜를 선택한 뒤 **그날의 날씨 추가**에서 도시 또는 현재 위치를 선택합니다. 과거 날짜의 장소를 현재 위치로 자동 추정하지 않습니다. 위치 좌표·시간대·날짜를 함께 저장합니다.
-
-최근 5일은 Open-Meteo Forecast API의 과거 구간, 그 이전은 Historical Weather API를 사용합니다. 오늘·미래는 예보, 과거는 모델/재분석 자료로 표시합니다. 일기 본문은 날씨 서비스에 보내지 않습니다. 개인 비상업용 무료 조건과 출처 표시를 따릅니다. [사용 조건](https://open-meteo.com/en/pricing), [과거 날씨 API](https://open-meteo.com/en/docs/historical-weather-api)
-
-## 구조와 운영 조건
-
-- `src/`: UI, 데이터 모델, IndexedDB, Drive·Calendar·날씨, 백업, 알림 클라이언트
-- `worker/`: 개인 알림 API, Cron, 표준 Web Push 암호화
-- `assets/`: 아이콘. PNG는 `scripts/icons.mjs`로 재생성
-- `scripts/`: 개발 서버, 정적 빌드, 알림 키 생성
-- `tests/`: 데이터·암호화 테스트 및 브라우저 테스트
-- `artifacts/`: 테스트용 예시 기록의 화면 캡처
-- `firebase.json`: 무료 Hosting 배포 설정
-
-현재 무료 정책과 개인 사용량 범위에서 월 운영비 0원을 목표로 합니다. 정책의 영구 유지는 보장되지 않으며 Drive 저장공간은 본인 계정의 여유 공간을 사용합니다. Firebase는 Spark, Cloudflare는 Free를 유지하세요. 유료 요금제에 자동 가입하는 코드는 없습니다.
-
-브라우저의 초안·사진은 IndexedDB에 저장됩니다. 브라우저 데이터 삭제나 OS 저장공간 정리로 **아직 동기화하지 않은 초안**이 사라질 수 있습니다. 앱 자체의 별도 암호화·잠금 기능은 첫 버전 범위에 포함하지 않았습니다.
-
-배포 후 본인 계정으로 Drive 업로드/재연결, 두 기기 수정 충돌, 캘린더 변경·취소, 사진 포함 ZIP 복원, 실제 iPhone/iPad의 앱 종료 상태 알림을 확인하세요.
+기존 Worker 알림 코드와 날씨 모듈은 보존했으나 새 화면에는 아직 연결하지 않았습니다. 새 화면의 일정은 사용자가 선택해서 가져오는 방식입니다.

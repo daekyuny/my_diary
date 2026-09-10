@@ -1,9 +1,19 @@
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { bundle } from './bundle.mjs';
+import { cp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { makeIcons } from './icons.mjs';
 await makeIcons();
+await rm('dist', { recursive: true, force: true });
 await mkdir('dist/vendor', { recursive: true });
-for (const path of ['index.html', 'src', 'assets', 'manifest.webmanifest', 'config.json'])
+await bundle('dist/vendor');
+for (const path of [
+  'index.html',
+  'legacy.html',
+  'src',
+  'assets',
+  'manifest.webmanifest',
+  'config.json',
+])
   await cp(path, `dist/${path}`, { recursive: true });
 await cp('node_modules/fflate/esm/browser.js', 'dist/vendor/fflate.js');
 let config;
@@ -28,6 +38,9 @@ const hash = createHash('sha256');
 for (const file of [
   'index.html',
   'src/app.js',
+  'src/journal/styles.css',
+  'legacy.html',
+  'dist/vendor/journal-app.js',
   'src/model.js',
   'src/google.js',
   'src/storage.js',
