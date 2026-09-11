@@ -48,6 +48,7 @@ test('responsive journal writes separate same-day entries, searches and switches
   await page.locator('#quick-entry').click();
   await expect(page.locator('#entry-date')).toHaveValue('2026-08-07');
   await page.locator('#close-editor').click();
+  await expect(page.locator('#editor-dialog')).not.toBeVisible();
   await page.locator('#search').fill('아침');
   await expect(page.locator('.record')).toHaveCount(1);
   await page.locator('#search').fill('<script>');

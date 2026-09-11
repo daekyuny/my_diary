@@ -1,5 +1,5 @@
 import * as store from '../storage.js';
-import * as google from '../google.js';
+import { uploadPrivateAsset } from './appdata.js';
 import { assetBlob } from '../sync.js';
 
 export async function makeThumbnail(blob, id) {
@@ -46,15 +46,20 @@ export async function previewBlob(image) {
   const thumbnail = await makeThumbnail(await assetBlob(image), image.id);
   return assetBlob(thumbnail);
 }
-export async function uploadPhoto(image) {
+export async function uploadPhoto(image, owner) {
   if (!image.thumbnail) image.thumbnail = await makeThumbnail(await assetBlob(image), image.id);
   for (const part of [image, image.thumbnail]) {
-    if (part.driveId) continue;
-    const asset = await store.get('assets', part.id);
+    if (part.driveId && part.storage === 'appDataFolder' && part.appOwner === owner) continue;
+    const asset =
+      (await store.get('assets', part.id)) ||
+      (part.driveId ? { ...part, blob: await assetBlob(part) } : null);
     if (!asset) throw new Error('사진 파일을 찾지 못했습니다.');
-    asset.driveId ||= await google.uploadAsset(asset);
+    asset.driveId = await uploadPrivateAsset(asset, owner);
+    asset.storage = 'appDataFolder';
     await store.put('assets', asset);
     part.driveId = asset.driveId;
+    part.storage = 'appDataFolder';
+    part.appOwner = owner;
   }
 }
 export const photoIds = (images = []) =>
@@ -64,6 +69,33 @@ export async function cleanLocalPhotos(currentImages = []) {
   const kept = new Set(
     photoIds([...records.flatMap((r) => r.entry.images || []), ...currentImages]),
   );
-  for (const asset of await store.all('assets'))
-    if (!kept.has(asset.id)) await store.remove('assets', asset.id);
+  const pending = new Set(
+    photoIds(records.filter((r) => !r.sheetSaved).flatMap((r) => r.entry.images || [])),
+  );
+  const privateSaved = new Set(
+    records
+      .filter((r) => r.sheetSaved)
+      .flatMap((r) =>
+        (r.entry.images || []).flatMap((image) =>
+          [image, image.thumbnail]
+            .filter((part) => part?.storage === 'appDataFolder' && part.driveId)
+            .map((part) => part.id),
+        ),
+      ),
+  );
+  let cacheBytes = 0;
+  const assets = (await store.all('assets')).sort(
+    (a, b) => (b.accessedAt || 0) - (a.accessedAt || 0),
+  );
+  for (const asset of assets) {
+    const uploaded =
+      (asset.storage === 'appDataFolder' && asset.driveId) || privateSaved.has(asset.id);
+    const thumbnail = asset.id.endsWith('-thumbnail');
+    if (uploaded && thumbnail) cacheBytes += asset.blob?.size || 0;
+    if (
+      !kept.has(asset.id) ||
+      (uploaded && !pending.has(asset.id) && (!thumbnail || cacheBytes > 20 * 1024 * 1024))
+    )
+      await store.remove('assets', asset.id);
+  }
 }

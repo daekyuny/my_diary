@@ -6,6 +6,7 @@ const sheetsQuota = createSheetsQuota({
 import { parseRevision, revisionFile, imageFileName, calendarEvent } from './model.js';
 
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+export const APPDATA_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 let token = '';
 let expiresAt = 0;
@@ -77,6 +78,9 @@ export async function restoreSession() {
 export function connected() {
   return Boolean(token) && Date.now() < expiresAt;
 }
+export function hasAppData() {
+  return connected() && scopes.split(' ').includes(APPDATA_SCOPE);
+}
 export function hasCalendar() {
   return connected() && scopes.split(' ').includes(CALENDAR_SCOPE);
 }
@@ -109,7 +113,7 @@ export function authorize(calendar = false) {
         new Error('Google 로그인 응답을 받지 못했습니다. 로그인 창을 확인한 뒤 다시 연결해주세요.'),
       );
     }, 90000);
-    const wanted = [DRIVE_SCOPE, ...(calendar ? [CALENDAR_SCOPE] : [])];
+    const wanted = [DRIVE_SCOPE, APPDATA_SCOPE, ...(calendar ? [CALENDAR_SCOPE] : [])];
     google.accounts.oauth2
       .initTokenClient({
         client_id: clientId,
@@ -370,7 +374,7 @@ function authorizeCode(calendar) {
     globalThis.google.accounts.oauth2
       .initCodeClient({
         client_id: clientId,
-        scope: [DRIVE_SCOPE, ...(calendar ? [CALENDAR_SCOPE] : [])].join(' '),
+        scope: [DRIVE_SCOPE, APPDATA_SCOPE, ...(calendar ? [CALENDAR_SCOPE] : [])].join(' '),
         ux_mode: 'popup',
         prompt: 'consent',
         callback: (response) => {

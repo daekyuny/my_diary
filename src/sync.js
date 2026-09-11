@@ -41,6 +41,7 @@ export async function assetBlob(image) {
   if (asset?.blob) return asset.blob;
   if (!image.driveId) throw new Error(`이미지 원본을 찾을 수 없습니다: ${image.name}`);
   const blob = await google.downloadAsset(image.driveId);
-  await storage.put('assets', { ...image, blob });
+  if (image.storage !== 'appDataFolder' || image.id.endsWith('-thumbnail'))
+    await storage.put('assets', { ...image, blob, accessedAt: Date.now() });
   return blob;
 }

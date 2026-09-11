@@ -1,7 +1,11 @@
 import { recentIds } from './cache.js';
 import { icon, hydrateIcons } from './icons.js';
 import { escape, visibleGroups, cards, calendarHTML } from './views.js';
-import { SheetsRepository, findSheets, createSheet, initializeSheet } from './sheets.js';
+import {
+  findRepositories as findSheets,
+  createRepository as createSheet,
+  migrateRepository,
+} from './appdata.js';
 import { parseArchive, stableKeepIds, makeBackup } from './backup.js';
 import { newEntry, localDate, validDate, makeRevision, mergeEvents } from '../model.js';
 import { entryGroups, expired } from './current.js';
@@ -125,9 +129,9 @@ function connection() {
         : online && repository
           ? pending
             ? '클라우드 저장 대기'
-            : 'Sheets 연결됨'
+            : '클라우드 연결됨'
           : online
-            ? '시트 연결 필요 · 기기 저장'
+            ? '저장소 연결 필요 · 기기 저장'
             : account
               ? 'Google 재연결 필요'
               : '기기에 저장';
@@ -137,9 +141,9 @@ function connection() {
   $('#resume-sync').disabled = busy || syncing || !navigator.onLine;
   $('#apply-update').hidden = !updateReady;
   $('#apply-update').disabled = busy || syncing || dirty;
-  $('#connect-banner').hidden = Boolean(online && repository);
+  $('#connect-banner').hidden = Boolean(online && repository && google.hasAppData());
   $('#account-name').textContent = account?.displayName || '나만의 일기장';
-  $('#account-caption').textContent = account?.emailAddress || 'Google Sheets에 연결하세요';
+  $('#account-caption').textContent = account?.emailAddress || 'Google에 연결하세요';
   $('#avatar').textContent = (account?.displayName || 'M').slice(0, 1);
   $('#settings-account').textContent = account
     ? `${account.emailAddress} · ${online ? 'Google 연결됨' : '재연결 필요'}`
@@ -162,38 +166,33 @@ function connection() {
   ])
     $('#' + id).disabled = busy || syncing;
   for (const id of ['connect', 'banner-connect', 'settings-connect']) {
-    $('#' + id).disabled = busy || syncing || online;
+    $('#' + id).disabled = busy || syncing || (online && google.hasAppData());
   }
   $('#sheet-options').hidden = false;
   $('#sheet-select').parentElement.hidden = !$('#sheet-select').options.length;
   $('#select-sheet').hidden = !$('#sheet-select').options.length;
   $('#repair-sheet').hidden = !$('#sheet-select').options.length;
-  $('#open-sheet').hidden = !repository;
+  $('#open-sheet').hidden = true;
   $('#create-sheet').hidden = Boolean(repository) || Boolean($('#sheet-select').options.length);
   $('#sheet-help').textContent = repository
-    ? '연결된 시트가 있습니다. 내 시트 열기에서 저장 위치와 내용을 확인하세요.'
-    : !online
-      ? '새 시트 만들기를 누르면 Google 로그인부터 진행합니다. 로그인 후 기존 시트가 없으면 생성할 수 있습니다.'
-      : $('#sheet-select').options.length
-        ? '기존 시트를 선택해 연결해주세요.'
-        : '아직 시트가 연결되지 않았습니다. 새 My Diary 시트 만들기를 눌러주세요.';
-  if (repository) $('#open-sheet').href = repository.url;
-  $('#migration-status').textContent = repository?.migrated
-    ? '사진·일정 연결 정보 이관 완료 · 추가항목 워크시트를 삭제해도 됩니다.'
-    : '시트 연결 후 추가항목 정보 이관 여부를 확인합니다.';
+    ? '일기와 사진은 앱 전용 공간에 저장됩니다. 기존 시트와 사진은 이전 전 사본으로 남습니다.'
+    : 'Google 연결 후 기존 일기를 이전하거나 새 앱 전용 저장소를 만듭니다.';
+  $('#migration-status').textContent = repository
+    ? '앱 전용 저장소 사용 중 · 다른 기기에서도 최신 앱으로 연결해주세요.'
+    : '복사와 검증을 완료한 후 앱 전용 저장소로 전환합니다.';
   if (!$('#settings-dialog').open)
     $('#trash-days').value = String(repository?.retentionDays ?? settings.trashDays ?? 30);
   $('#move-local').hidden = !account || !repository;
   $('#sheet-details').textContent = repository
-    ? `시트 ID: ${repository.id} · 시트에서 확인한 일기 ${repository.index.filter((r) => !r.entry.deletedAt).length}개 · 휴지통 ${repository.index.filter((r) => r.entry.deletedAt).length}개 · 이 기기 저장 대기 ${pending}개${online ? '' : ' · 재연결 후 최신 개수 확인'}`
-    : '연결된 시트 없음 · 현재 기록은 이 기기에만 저장됩니다.';
+    ? `저장소 ID: ${repository.id} · 클라우드 일기 ${repository.index.filter((r) => !r.entry.deletedAt).length}개 · 휴지통 ${repository.index.filter((r) => r.entry.deletedAt).length}개 · 이 기기 저장 대기 ${pending}개${online ? '' : ' · 재연결 후 최신 개수 확인'}`
+    : '연결된 저장소 없음 · 현재 기록은 이 기기에만 저장됩니다.';
   if (entry)
     $('#save-state').textContent = dirty
       ? '저장하지 않은 변경'
       : groups.find((g) => g.latest.entry.id === entry.id)?.heads.length > 1
         ? '다른 기기 수정 확인'
         : groups.find((g) => g.latest.id === activeRevision)?.latest.sheetSaved
-          ? '✓ Sheets 저장 완료'
+          ? '✓ 클라우드 저장 완료'
           : activeRevision
             ? '✓ 기기에 저장'
             : '새 기록';
@@ -314,7 +313,11 @@ async function refresh() {
     );
     if (pending && pending.id !== revision.id) continue;
     await store.mergeRemoteRevision(
-      existing && !existing.summary
+      existing &&
+        !existing.summary &&
+        !repository.private &&
+        !revision.conflict &&
+        !existing.conflict
         ? { ...existing, sheetSaved: true, row: revision.row, tab: revision.tab }
         : revision,
     );
@@ -404,7 +407,8 @@ function syncCloud() {
           batch.push(pending[offset++]);
         }
         for (const revision of batch) {
-          for (const image of revision.entry.images) await uploadPhoto(image);
+          for (const image of revision.entry.images)
+            await uploadPhoto(image, `${repository.id}:${revision.entry.id}`);
           for (const removed of revision.entry.removedImages || []) {
             const original = await store.get('assets', removed.id);
             removed.driveId ||= original?.driveId;
@@ -422,7 +426,7 @@ function syncCloud() {
           }
           await store.acknowledgeRevision(revision);
         }
-        syncProgress = `이번 묶음 ${batch.length}개를 Sheets에 저장하고 있습니다. 전체 저장 대기 ${pending.length - offset + batch.length}개`;
+        syncProgress = `이번 묶음 ${batch.length}개를 클라우드에 저장하고 있습니다. 전체 저장 대기 ${pending.length - offset + batch.length}개`;
         connection();
         try {
           await repository.saveMany(batch);
@@ -455,7 +459,7 @@ function syncCloud() {
       ? `${conflicts.length}개 일기에 수정 충돌이 있습니다. 해당 일기를 열어 확인해주세요.`
       : '';
     $('#cloud-error').hidden = !conflicts.length;
-    if (saved && !syncAgain) toast('Google Sheets에 저장했습니다.');
+    if (saved && !syncAgain) toast('Google 클라우드에 저장했습니다.');
   })()
     .catch((error) => {
       syncProgress = '전송이 중단되었습니다. 남은 기록은 기기에 보관됩니다.';
@@ -526,7 +530,7 @@ $('#resolve-conflict').onclick = () => {
   const revision = conflictingRevision;
   small(
     '양쪽에서 수정된 일기',
-    `<p>같은 일기가 다른 기기에서도 수정됐습니다. 기기 수정본과 시트 기록을 별도로 보존할 수 있습니다.</p><h3>이 기기</h3><pre>${escape(revision.entry.body)}</pre><h3>시트</h3><pre>${escape(revision.conflict.entry.body)}</pre><button id="keep-conflict-copy" class="primary">기기 수정본을 별도 일기로 보존</button>`,
+    `<p>같은 일기가 다른 기기에서도 수정됐습니다. 기기 수정본과 클라우드 기록을 별도로 보존할 수 있습니다.</p><h3>이 기기</h3><pre>${escape(revision.entry.body)}</pre><h3>클라우드</h3><pre>${escape(revision.conflict.entry.body)}</pre><button id="keep-conflict-copy" class="primary">기기 수정본을 별도 일기로 보존</button>`,
   );
   $('#keep-conflict-copy').onclick = () =>
     task(async () => {
@@ -537,7 +541,12 @@ $('#resolve-conflict').onclick = () => {
         title: `${revision.entry.title || '제목 없는 일기'} (기기 수정본)`,
       });
       await store.put('revisions', copy);
-      await store.replaceCurrent(revision.conflict);
+      if (revision.cloudConflict)
+        for (const image of copy.entry.images)
+          await uploadPhoto(image, `${repository.id}:${copy.entry.id}`);
+      await store.replaceCurrent(
+        revision.cloudConflict ? await repository.resolve(revision, copy) : revision.conflict,
+      );
       conflictingRevision = null;
       $('#small-dialog').close();
       await closeEditor();
@@ -626,19 +635,13 @@ function openSettings() {
   $('#settings-dialog').showModal();
 }
 async function selectRepository(id, closeSettings = true) {
-  const candidate = new SheetsRepository(id);
-  await candidate.prepare();
-  if (!candidate.migrated) {
-    await candidate.migrate();
-    await candidate.compact();
-  } else {
-    await candidate.list();
-    if (
-      candidate.rawRows.some((row) => !row.some((v) => v !== '' && v != null)) ||
-      candidate.rawIndex.length !== candidate.index.length
-    )
-      await candidate.compact();
-  }
+  const candidate = await migrateRepository(id, {
+    progress: (message) => {
+      syncProgress = message;
+      connection();
+    },
+  });
+  await candidate.list();
   await save(false);
   const previousOwner = owner();
   const unattached = previousOwner.endsWith('-unassigned')
@@ -666,7 +669,7 @@ async function selectRepository(id, closeSettings = true) {
   $('#cloud-error').hidden = true;
   $('#sheet-options').hidden = true;
   if (closeSettings) $('#settings-dialog').close();
-  toast('같은 Google 계정의 기기에서 이 시트를 함께 사용합니다.');
+  toast('같은 Google 계정의 기기에서 앱 전용 저장소를 함께 사용합니다.');
 }
 function connect(calendar = false, choose = false) {
   if (!ready || busy) return;
@@ -681,7 +684,7 @@ function connect(calendar = false, choose = false) {
   }
   // Keep OAuth call synchronous with the click for mobile popup permission.
   const authorization =
-    google.connected() && (!calendar || google.hasCalendar())
+    google.connected() && google.hasAppData() && (!calendar || google.hasCalendar())
       ? Promise.resolve()
       : google.authorize(calendar);
   task(async () => {
@@ -735,8 +738,8 @@ function connect(calendar = false, choose = false) {
       showFiles();
       toast(
         files.length
-          ? '사용할 My Diary 시트를 선택해주세요.'
-          : 'My Diary 폴더에 새 시트를 만들 준비가 됐습니다.',
+          ? '이전하거나 연결할 일기 저장소를 선택해주세요.'
+          : '새 앱 전용 저장소를 만들 준비가 됐습니다.',
       );
     }
   });
@@ -1095,7 +1098,7 @@ $('#sync').onclick = () => {
 };
 $('#find-sheets').onclick = () => connect(false, true);
 $('#create-sheet').onclick = () => {
-  if (!google.connected()) return connect();
+  if (!google.connected() || !google.hasAppData()) return connect();
   task(async () => {
     const created = await createSheet();
     await selectRepository(created.id);
@@ -1105,7 +1108,7 @@ $('#select-sheet').onclick = () => task(() => selectRepository($('#sheet-select'
 $('#repair-sheet').onclick = () =>
   task(async () => {
     const id = $('#sheet-select').value;
-    await initializeSheet(id);
+    // Retrying migration preserves the source and resumes verified attachments.
     await selectRepository(id);
   });
 $('#disconnect').onclick = () =>
@@ -1159,15 +1162,17 @@ $('#export').onclick = () =>
   task(async () => {
     await save();
     if (repository && google.connected()) await refresh();
-    const revisions = [];
-    for (const r of await store.all('revisions')) revisions.push(await hydrate(r));
+    const revisions =
+      repository?.private && google.connected() ? await repository.backupRevisions() : [];
+    for (const r of await store.all('revisions'))
+      if (!revisions.some((saved) => saved.id === r.id)) revisions.push(await hydrate(r));
     download(await makeBackup(revisions, assetBlob), `my-diary-${localDate()}.zip`);
     toast('일기와 사진 원본을 ZIP으로 내보냈습니다.');
   });
 $('#move-local').onclick = () =>
   task(async () => {
     if (!repository || !google.connected())
-      throw new Error('먼저 Google에 연결하고 저장할 시트를 선택해주세요.');
+      throw new Error('먼저 Google에 연결하고 저장소를 선택해주세요.');
     await save(false);
     const currentOwner = owner();
     let revisions, assets;
@@ -1251,8 +1256,6 @@ async function start() {
   await store.openStore(owner());
   await recover();
   await load();
-  if (account && settings.sheets?.[account.permissionId])
-    repository = new SheetsRepository(settings.sheets[account.permissionId]);
   $('#today').textContent = new Date().toLocaleDateString('ko-KR', {
     year: 'numeric',
     month: 'long',
@@ -1275,6 +1278,12 @@ async function start() {
   if (account)
     task(async () => {
       if (await google.restoreSession()) {
+        if (!google.hasAppData()) {
+          repository = null;
+          toast('앱 전용 저장소 권한이 필요합니다. Google에 다시 연결해주세요.');
+          connection();
+          return;
+        }
         const identity = await google.identity();
         if (identity.permissionId !== account.permissionId)
           throw new Error('Google 계정이 달라 다시 연결해야 합니다.');

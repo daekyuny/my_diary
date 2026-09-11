@@ -32,12 +32,17 @@ export function parseArchive(bytes) {
       delete r.sheetSaved;
       delete r.driveId;
       delete r.remoteKnown;
+      delete r.conflict;
+      delete r.cloudConflict;
+      delete r.baseRevision;
       delete r.entry.removedImages;
       for (const image of r.entry.images) {
         const data = files[`attachments/${imageFileName(image)}`];
         if (!data) throw new Error(`사진 원본 누락: ${image.name}`);
         delete image.driveId;
         delete image.thumbnail;
+        delete image.storage;
+        delete image.appOwner;
         assets.set(image.id, { ...image, blob: new Blob([data], { type: image.type }) });
       }
       revisions.push(r);
@@ -106,6 +111,24 @@ export async function stableKeepIds(revisions) {
   return revisions;
 }
 export async function makeBackup(revisions, assetBlob) {
+  const unique = new Map();
+  function include(r) {
+    if (unique.has(r.id)) return;
+    unique.set(r.id, r);
+    if (r.conflict) include(r.conflict);
+  }
+  revisions.forEach(include);
+  const entries = new Set();
+  revisions = [...unique.values()].map((raw) => {
+    const r = structuredClone(raw);
+    if (entries.has(r.entry.id)) {
+      r.entry.id = `conflict-${r.id}`;
+      r.entry.title = `${r.entry.title || '제목 없는 일기'} (충돌 보존본)`;
+    }
+    entries.add(r.entry.id);
+    for (const key of ['conflict', 'cloudConflict', 'baseRevision', 'remoteKnown']) delete r[key];
+    return r;
+  });
   const files = {},
     portable = revisions.map((r) => {
       const { sheetSaved, summary, row, ...rest } = r;
