@@ -647,13 +647,11 @@ test('partially imported ZIP resumes the remaining local records after reload', 
         ),
       ]),
     );
-    await page
-      .locator('#import-input')
-      .setInputFiles({
-        name: 'keep.zip',
-        mimeType: 'application/zip',
-        buffer: Buffer.from(zipSync(files)),
-      });
+    await page.locator('#import-input').setInputFiles({
+      name: 'keep.zip',
+      mimeType: 'application/zip',
+      buffer: Buffer.from(zipSync(files)),
+    });
     await expect(page.locator('#connection')).toHaveText('클라우드 저장 대기');
     expect(state.tabs['일기'].rows.filter((r) => r[0]).length).toBe(21);
     state.failAfterTwenty = false;
