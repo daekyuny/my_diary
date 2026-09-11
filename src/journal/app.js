@@ -6,6 +6,7 @@ import { newEntry, localDate, validDate, makeRevision, mergeEvents } from '../mo
 import { entryGroups, expired } from './current.js';
 import * as store from '../storage.js';
 import * as google from '../google.js';
+import { createPhoto, previewBlob, uploadPhoto, cleanLocalPhotos } from './photos.js';
 import { assetBlob } from '../sync.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -125,7 +126,13 @@ function connection() {
     ? `${account.emailAddress} · ${online ? 'Google 연결됨' : '재연결 필요'}`
     : '연결 전 기록은 이 기기에만 저장됩니다.';
   $('#save').disabled = busy || !dirty;
+  document
+    .querySelectorAll('.record, [data-delete-entry]')
+    .forEach((button) => (button.disabled = busy));
   $('#disconnect').hidden = !account;
+  for (const id of ['connect', 'banner-connect', 'settings-connect']) {
+    $('#' + id).disabled = busy || online;
+  }
   $('#sheet-options').hidden = false;
   $('#sheet-select').parentElement.hidden = !$('#sheet-select').options.length;
   $('#select-sheet').hidden = !$('#sheet-select').options.length;
@@ -143,7 +150,7 @@ function connection() {
   $('#trash-days').value = String(repository?.retentionDays ?? settings.trashDays ?? 30);
   $('#move-local').hidden = !account || !repository;
   $('#sheet-details').textContent = repository
-    ? `시트 ID: ${repository.id} · 시트에서 확인한 일기 ${entryGroups(repository.index).length}개 · 이 기기 저장 대기 ${pending}개${online ? '' : ' · 재연결 후 최신 개수 확인'}`
+    ? `시트 ID: ${repository.id} · 시트에서 확인한 일기 ${repository.index.filter((r) => !r.entry.deletedAt).length}개 · 휴지통 ${repository.index.filter((r) => r.entry.deletedAt).length}개 · 이 기기 저장 대기 ${pending}개${online ? '' : ' · 재연결 후 최신 개수 확인'}`
     : '연결된 시트 없음 · 현재 기록은 이 기기에만 저장됩니다.';
   if (entry)
     $('#save-state').textContent = dirty
@@ -275,7 +282,7 @@ async function refresh() {
     if (pending && pending.id !== revision.id) continue;
     await store.replaceCurrent(
       existing && !existing.summary
-        ? { ...existing, sheetSaved: true, row: revision.row }
+        ? { ...existing, sheetSaved: true, row: revision.row, tab: revision.tab }
         : revision,
     );
   }
@@ -319,22 +326,18 @@ async function save(sync = true, commit = false) {
     for (const revision of (await store.all('revisions')).filter(
       (r) => !r.sheetSaved && !r.summary,
     )) {
-      for (const image of revision.entry.images) {
-        if (image.driveId) continue;
-        const asset = await store.get('assets', image.id);
-        if (!asset) throw new Error(`사진 원본이 없습니다: ${image.name}`);
-        asset.driveId ||= await google.uploadAsset(asset);
-        await store.put('assets', asset);
-        image.driveId = asset.driveId;
-      }
+      for (const image of revision.entry.images) await uploadPhoto(image);
       await repository.save(revision);
+      delete revision.entry.removedImages;
       await store.replaceCurrent({ ...revision, sheetSaved: true, remoteKnown: true });
       if (!dirty && entry?.id === revision.entry.id) {
         entry.images = structuredClone(revision.entry.images);
+        delete entry.removedImages;
         savedContent = JSON.stringify(entry);
       }
     }
     await refresh();
+    await cleanLocalPhotos(entry?.images || []);
   }
   connection();
 }
@@ -412,16 +415,16 @@ async function renderPhotos() {
   $('#photos').innerHTML = '';
   for (const image of entry.images) {
     const figure = document.createElement('figure');
-    figure.innerHTML = `<figcaption>${escape(image.name)}</figcaption><button type="button" data-remove-photo="${escape(image.id)}">첨부 해제</button>`;
+    figure.innerHTML = `<figcaption>${escape(image.name)}</figcaption><button type="button" data-remove-photo="${escape(image.id)}">첨부 삭제</button>`;
     $('#photos').append(figure);
     try {
-      const blob = await assetBlob(image);
+      const blob = await previewBlob(image);
       if (generation !== photoGeneration) return;
       const url = URL.createObjectURL(blob);
       urls.push(url);
       figure.insertAdjacentHTML(
         'afterbegin',
-        `<a href="${url}" target="_blank" rel="noopener" aria-label="${escape(image.name)} 원본 보기"><img src="${url}" alt="${escape(image.name)}"/></a>`,
+        `<button type="button" class="photo-preview" data-open-photo="${escape(image.id)}" aria-label="원본 사진 보기"><img src="${url}" alt="첨부 사진 미리보기"/></button>`,
       );
     } catch {
       if (generation === photoGeneration)
@@ -433,6 +436,7 @@ async function closeEditor() {
   if (dirty && !window.confirm('저장하지 않은 변경 내용이 있습니다. 저장하지 않고 닫을까요?'))
     return;
   if (entry) await store.remove('drafts', entry.id);
+  await cleanLocalPhotos();
   dirty = false;
   savedContent = null;
   $('#editor-dialog').close();
@@ -476,7 +480,10 @@ async function saveDefinition(def) {
   renderDefinitions();
   if (entry) renderFields();
 }
-function definitionDialog(def = { id: crypto.randomUUID(), name: '', type: 'text', options: [] }) {
+function definitionDialog(
+  def = { id: crypto.randomUUID(), name: '', type: 'text', options: [] },
+  attach = false,
+) {
   small(
     '추가 항목 설정',
     `<form id="definition-form"><label class="form-label">항목 이름<input id="definition-name" value="${escape(def.name)}" placeholder="예: 장소, 읽은 책, 운동 시간" maxlength="50" required/></label><label class="form-label">입력 방식<select id="definition-type">${[
@@ -512,11 +519,18 @@ function definitionDialog(def = { id: crypto.randomUUID(), name: '', type: 'text
         ],
       };
       await saveDefinition(next);
+      if (attach && entry && !entry.fields?.some((field) => field.id === next.id)) {
+        entry.fields ||= [];
+        entry.fields.push({ id: next.id, name: next.name, value: '' });
+        changed();
+        renderFields();
+      }
       $('#small-dialog').close();
+      if (attach) $('#fields input:last-of-type, #fields select:last-of-type')?.focus();
     });
   };
 }
-async function selectRepository(id) {
+async function selectRepository(id, closeSettings = true) {
   const candidate = new SheetsRepository(id);
   await candidate.prepare();
   await candidate.compact();
@@ -546,7 +560,7 @@ async function selectRepository(id) {
   await purgeTrash(false);
   $('#cloud-error').hidden = true;
   $('#sheet-options').hidden = true;
-  $('#settings-dialog').close();
+  if (closeSettings) $('#settings-dialog').close();
   toast('같은 Google 계정의 기기에서 이 시트를 함께 사용합니다.');
 }
 function connect(calendar = false, choose = false) {
@@ -561,7 +575,10 @@ function connect(calendar = false, choose = false) {
     return;
   }
   // Keep OAuth call synchronous with the click for mobile popup permission.
-  const authorization = google.authorize(calendar);
+  const authorization =
+    google.connected() && (!calendar || google.hasCalendar())
+      ? Promise.resolve()
+      : google.authorize(calendar);
   task(async () => {
     await authorization;
     await save(false);
@@ -754,7 +771,9 @@ $('#search').oninput = () => {
   visibleLimit = 40;
   render();
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => task(searchBodies), 500);
+  searchTimer = setTimeout(() => {
+    if (!document.querySelector('dialog[open]')) task(searchBodies);
+  }, 500);
 };
 for (const id of ['tag-filter', 'sort', 'from', 'to'])
   $('#' + id).onchange = () => {
@@ -866,7 +885,7 @@ $('#add-field').onclick = () => {
       $('#small-dialog').close();
     }
   };
-  $('#create-field-here').onclick = () => definitionDialog();
+  $('#create-field-here').onclick = () => definitionDialog(undefined, true);
 };
 $('#events').oninput = (e) => {
   if (e.target.dataset.eventTitle !== undefined) {
@@ -939,8 +958,23 @@ async function getCalendar(date) {
     });
 }
 $('#photos').onclick = (e) => {
+  const open = e.target.closest('[data-open-photo]');
+  if (open) {
+    const image = entry.images.find((item) => item.id === open.dataset.openPhoto);
+    small('원본 사진', '<p>원본을 불러오는 중…</p>');
+    task(async () => {
+      const url = URL.createObjectURL(await assetBlob(image));
+      urls.push(url);
+      if ($('#small-dialog').open)
+        $('#small-body').innerHTML =
+          `<img class="original-photo" src="${url}" alt="첨부 사진 원본"/><p><a href="${url}" download="${escape(image.name)}">원본 다운로드</a></p>`;
+    });
+    return;
+  }
   const b = e.target.closest('[data-remove-photo]');
   if (b) {
+    const removed = entry.images.find((image) => image.id === b.dataset.removePhoto);
+    entry.removedImages = [...(entry.removedImages || []), removed];
     entry.images = entry.images.filter((image) => image.id !== b.dataset.removePhoto);
     changed();
     renderPhotos();
@@ -950,11 +984,9 @@ $('#add-photo').onclick = () => $('#photo-input').click();
 $('#photo-input').onchange = () =>
   task(async () => {
     for (const file of $('#photo-input').files) {
-      if (file.size > 10 * 1024 * 1024 || !/^image\/(jpeg|png|webp|gif)$/.test(file.type))
-        throw new Error('10MB 이하 JPG·PNG·WebP·GIF 사진을 선택해주세요.');
-      const image = { id: crypto.randomUUID(), name: file.name, type: file.type };
-      await store.put('assets', { ...image, blob: file });
+      const image = await createPhoto(file);
       entry.images.push(image);
+      changed();
     }
     dirty = true;
     $('#photo-input').value = '';
@@ -1085,10 +1117,17 @@ async function resumeConnection() {
   await save();
   await refresh();
 }
-window.addEventListener('online', () => task(resumeConnection));
+function backgroundSync() {
+  if (
+    document.querySelector('dialog[open]') ||
+    document.activeElement?.matches('input,textarea,select,[contenteditable]')
+  )
+    return;
+  task(resumeConnection);
+}
+window.addEventListener('online', backgroundSync);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && Date.now() - lastRefresh > 15000)
-    task(resumeConnection);
+  if (document.visibilityState === 'visible' && Date.now() - lastRefresh > 15000) backgroundSync();
 });
 setInterval(() => {
   connection();
@@ -1097,7 +1136,7 @@ setInterval(() => {
     (google.connected() || (account && settings.authServer)) &&
     Date.now() - lastRefresh > 20000
   )
-    task(resumeConnection);
+    backgroundSync();
 }, 25000);
 window.addEventListener('beforeunload', (e) => {
   if (dirty || busy) {
@@ -1153,7 +1192,7 @@ async function start() {
             settings.sheetFolders ||= {};
             settings.sheetFolders[file.id] = file.parents[0];
           }
-          await selectRepository(file.id);
+          await selectRepository(file.id, false);
         }
       }
     });
@@ -1191,10 +1230,7 @@ async function purgeTrash(ask = true) {
     if (ids.includes(r.entry.id)) await store.remove('revisions', r.id);
   for (const d of await store.all('drafts'))
     if (ids.includes(d.entry.id)) await store.remove('drafts', d.id);
-  const references = [...(await store.all('revisions')), ...(await store.all('drafts'))];
-  const keptAssets = new Set(references.flatMap((r) => r.entry.images.map((image) => image.id)));
-  for (const asset of await store.all('assets'))
-    if (!keptAssets.has(asset.id)) await store.remove('assets', asset.id);
+  await cleanLocalPhotos();
   await load();
   if (repository) await refresh();
   if (ask) toast(`${ids.length}개 일기를 완전 삭제했습니다.`);

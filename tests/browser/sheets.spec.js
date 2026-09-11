@@ -19,7 +19,9 @@ async function mock(context, state) {
   await context.route(/^https:\/\/(www|sheets)\.googleapis\.com\//, async (route) => {
     const request = route.request(),
       url = new URL(request.url()),
-      body = request.postDataJSON();
+      body = request.headers()['content-type']?.includes('multipart')
+        ? null
+        : request.postDataJSON();
     if (url.pathname.startsWith('/sheets/'))
       return route.fulfill({ status: 404, body: 'Invalid Sheets endpoint' });
     if (url.pathname.startsWith('/v4/')) expect(url.hostname).toBe('sheets.googleapis.com');
@@ -33,6 +35,39 @@ async function mock(context, state) {
           emailAddress: 'diary@example.com',
         },
       });
+    if (url.pathname.startsWith('/upload/drive/v3/files')) {
+      const metadata = JSON.parse(request.postData().split('\r\n\r\n')[1].split('\r\n--')[0]);
+      state.uploads ||= [];
+      const id = `asset-${state.uploads.length + 1}`;
+      state.uploads.push({ id, ...metadata });
+      return send({ id });
+    }
+    if (/^\/drive\/v3\/files\/asset-/.test(url.pathname)) {
+      const id = url.pathname.split('/').at(-1);
+      if (request.method() === 'DELETE') {
+        if (state.failDeletes) return send({ error: { message: '사진 삭제 실패' } }, 503);
+        (state.deleted ||= []).push(id);
+        return send({});
+      }
+      (state.downloads ||= []).push(id);
+      return route.fulfill({
+        contentType: 'image/png',
+        body: Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII=',
+          'base64',
+        ),
+      });
+    }
+    if (
+      url.pathname === '/drive/v3/files' &&
+      request.method() === 'GET' &&
+      url.searchParams.get('q').includes('assetId')
+    ) {
+      const id = /value='([^']+)'/.exec(url.searchParams.get('q'))?.[1];
+      return send({
+        files: (state.uploads || []).filter((item) => item.appProperties.assetId === id),
+      });
+    }
     if (url.pathname === '/drive/v3/files' && request.method() === 'GET')
       return send({
         files: url.searchParams.get('q').includes('spreadsheet')
@@ -74,7 +109,10 @@ async function mock(context, state) {
       });
     }
     if (url.pathname.endsWith(':batchUpdate')) {
-      if (state.failInitialize && body.requests.some((r) => r.addSheet))
+      if (
+        state.failInitialize &&
+        body.requests.some((r) => r.addSheet && r.addSheet.properties.title !== '__MyDiaryLock')
+      )
         return send({ error: { message: 'Sheets API 초기 설정 실패' } }, 403);
       const isSave = body.requests.some(
         (r) =>
@@ -83,10 +121,31 @@ async function mock(context, state) {
           r.updateCells?.start?.sheetId === 100,
       );
       if (isSave && state.failWrites) return send({ error: { message: '잠시 저장 실패' } }, 503);
+      if (
+        body.requests.some(
+          (r) =>
+            r.addSheet &&
+            (state.tabs[r.addSheet.properties.title] ||
+              Object.values(state.tabs).some((tab) => tab.id === r.addSheet.properties.sheetId)),
+        )
+      )
+        return send({ error: { message: 'Sheet already exists' } }, 400);
       for (const r of body.requests) {
         if (r.deleteSheet) {
-          expect(r.deleteSheet.sheetId).toBe(0);
-          state.defaultDeleted = true;
+          if (r.deleteSheet.sheetId === 0) state.defaultDeleted = true;
+          else {
+            const title = Object.keys(state.tabs).find(
+              (name) => state.tabs[name].id === r.deleteSheet.sheetId,
+            );
+            expect(title).toBe('__MyDiaryLock');
+            delete state.tabs[title];
+          }
+        }
+        if (r.deleteDimension) {
+          const { sheetId, startIndex, endIndex } = r.deleteDimension.range;
+          Object.values(state.tabs)
+            .find((t) => t.id === sheetId)
+            .rows.splice(startIndex, endIndex - startIndex);
         }
         if (r.updateCells) {
           const update = r.updateCells,
@@ -213,13 +272,18 @@ test('trash restores, retention purges on demand, and another device drops remov
     await expect(second.locator('.record')).toHaveCount(1);
     await page.locator('[data-delete-entry]').click();
     await expect(page.locator('.record')).toHaveCount(0);
+    await expect.poll(() => populated(state).length).toBe(0);
+    await expect.poll(() => state.tabs['휴지통'].rows.slice(1).filter((r) => r[0]).length).toBe(1);
     await page.locator('[data-collection=archive]:visible').click();
     await expect(page.locator('.record')).toHaveCount(1);
     await page.locator('[data-delete-entry]').click();
     await expect(page.locator('.record')).toHaveCount(0);
+    await expect.poll(() => state.tabs['휴지통'].rows.slice(1).filter((r) => r[0]).length).toBe(0);
     await page.locator('[data-collection=journal]:visible').click();
     await expect(page.locator('.record')).toHaveCount(1);
     await page.locator('[data-delete-entry]').click();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    await expect.poll(() => state.tabs['휴지통'].rows.slice(1).filter((r) => r[0]).length).toBe(1);
     await settings(page);
     await page.locator('#trash-days').selectOption('0');
     await page.locator('#save-retention').click();
@@ -227,11 +291,11 @@ test('trash restores, retention purges on demand, and another device drops remov
     page.once('dialog', (dialog) => dialog.accept());
     await page.locator('#purge-trash').click();
     await expect(page.locator('#toast')).toContainText('1개 일기');
-    expect(populated(state)).toHaveLength(0);
+    await expect.poll(() => populated(state).length).toBe(0);
     expect(state.tabs['추가항목'].rows.slice(1).filter((r) => r[0])).toHaveLength(0);
     await second.locator('#sync').click();
     await expect(second.locator('.record')).toHaveCount(0);
-    expect(populated(state)).toHaveLength(0);
+    await expect.poll(() => populated(state).length).toBe(0);
   } finally {
     await a.close();
     await b.close();
@@ -303,5 +367,148 @@ test('server session restores after reload and refreshes an expired Google token
     expect(state.exists).toBe(true);
   } finally {
     await context.close();
+  }
+});
+
+test('distinct diaries stay contiguous and editing keeps focus through scheduled sync', async ({
+  browser,
+}) => {
+  const state = { exists: false, tabs: {} };
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await page.clock.install();
+    await setup(page);
+    for (const title of ['첫 일기', '둘째 일기']) {
+      await page.locator('#quick-entry').click();
+      await page.locator('#entry-title').fill(title);
+      await saveClose(page);
+      await expect(page.locator('#editor-dialog')).not.toBeVisible();
+    }
+    state.tabs['일기'].rows.splice(1, 0, ...Array.from({ length: 55 }, () => []));
+    await page.reload();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    await expect.poll(() => state.tabs['일기'].rows.length).toBe(3);
+    expect(populated(state).map((r) => r[5])).toEqual(['첫 일기', '둘째 일기']);
+    await settings(page);
+    await expect(page.locator('#settings-connect')).toBeDisabled();
+    await page.locator('#close-settings').click();
+    await page.locator('.record').first().click();
+    await page.locator('#entry-body').fill('계속 입력 중');
+    await page.locator('#entry-body').evaluate((el) => el.setSelectionRange(2, 4));
+    await page.clock.fastForward(75000);
+    await expect(page.locator('#entry-body')).toBeFocused();
+    expect(
+      await page.locator('#entry-body').evaluate((el) => [el.selectionStart, el.selectionEnd]),
+    ).toEqual([2, 4]);
+    await expect(page.locator('#entry-body')).toHaveValue('계속 입력 중');
+    expect(populated(state).every((r) => !r[10])).toBe(true);
+    await saveClose(page);
+  } finally {
+    await context.close();
+  }
+});
+
+test('attachments use separate previews, load originals on demand and delete both after saving removal', async ({
+  browser,
+}) => {
+  const state = { exists: false, tabs: {} };
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await setup(page);
+    await page.locator('#quick-entry').click();
+    await page.locator('#entry-title').fill('사진 일기');
+    const bytes = await page.evaluate(async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1600;
+      canvas.height = 900;
+      canvas.getContext('2d').fillRect(0, 0, 1600, 900);
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+      return Array.from(new Uint8Array(await blob.arrayBuffer()));
+    });
+    await page.locator('#photo-input').setInputFiles({
+      name: 'private-original-name.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from(bytes),
+    });
+    await expect(page.locator('.photo-preview img')).toBeVisible();
+    expect(await page.locator('.photo-preview img').evaluate((el) => el.naturalWidth)).toBe(480);
+    await saveClose(page);
+    expect(state.uploads).toHaveLength(2);
+    expect(state.uploads[0].name).toMatch(/^[\w-]+-original\.png$/);
+    expect(state.uploads[1].name).toMatch(/^[\w-]+-thumbnail\.jpg$/);
+    const second = await browser.newContext({ serviceWorkers: 'block' });
+    await mock(second, state);
+    try {
+      const other = await second.newPage();
+      await other.goto('/');
+      await expect(other.locator('#banner-connect')).toBeEnabled();
+      await other.locator('#banner-connect').click();
+      await expect(other.locator('.record')).toHaveCount(1);
+      await other.locator('.record').click();
+      await expect(other.locator('.photo-preview img')).toBeVisible();
+      expect(state.downloads).toEqual([state.uploads[1].id]);
+      await other.locator('[data-open-photo]').click();
+      await expect(other.locator('.original-photo')).toBeVisible();
+      expect(state.downloads).toEqual([state.uploads[1].id, state.uploads[0].id]);
+      await other.locator('#close-small').click();
+      await other.locator('[data-remove-photo]').click();
+      expect(state.deleted || []).toHaveLength(0);
+      other.once('dialog', (dialog) => dialog.accept());
+      await other.locator('#close-editor').click();
+      await other.locator('.record').click();
+      await expect(other.locator('.photo-preview img')).toBeVisible();
+      await other.locator('[data-remove-photo]').click();
+      state.failDeletes = true;
+      await other.locator('#save').click();
+      await expect(other.locator('#toast')).toContainText('사진 삭제 실패');
+      state.failDeletes = false;
+      await other.locator('#close-editor').click();
+      await other.locator('#sync').click();
+      await expect(other.locator('#connection')).toHaveText('Sheets 연결됨');
+      expect(state.deleted).toEqual([state.uploads[0].id, state.uploads[1].id]);
+    } finally {
+      await second.close();
+    }
+  } finally {
+    await context.close();
+  }
+});
+
+test('simultaneous device cleanup cannot delete rows shifted by the other device', async ({
+  browser,
+}) => {
+  const state = { exists: false, tabs: {} };
+  const contexts = await Promise.all([
+    browser.newContext({ serviceWorkers: 'block' }),
+    browser.newContext({ serviceWorkers: 'block' }),
+  ]);
+  try {
+    for (const context of contexts) await mock(context, state);
+    const [a, b] = await Promise.all(contexts.map((context) => context.newPage()));
+    await setup(a);
+    await a.locator('#quick-entry').click();
+    await a.locator('#entry-title').fill('양쪽에서 보존할 기록');
+    await saveClose(a);
+    await b.goto('/');
+    await expect(b.locator('#banner-connect')).toBeEnabled();
+    await b.locator('#banner-connect').click();
+    await expect(b.locator('.record')).toBeEnabled();
+    state.tabs['일기'].rows.splice(1, 0, ...Array.from({ length: 55 }, () => []));
+    await Promise.all([a.reload(), b.reload()]);
+    await Promise.all(
+      [a, b].map(async (page) => {
+        await expect(page.locator('#toast')).toContainText('같은 Google 계정');
+        await expect(page.locator('.record')).toBeEnabled();
+        await expect(page.locator('.record')).toContainText('양쪽에서 보존할 기록');
+      }),
+    );
+    expect(state.tabs['일기'].rows).toHaveLength(2);
+    expect(state.tabs.__MyDiaryLock).toBeUndefined();
+  } finally {
+    for (const context of contexts) await context.close();
   }
 });

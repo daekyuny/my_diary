@@ -281,7 +281,12 @@ export async function uploadAsset(asset) {
   );
   return (
     existing[0]?.id ||
-    upload(imageFileName(asset), asset.blob, { kind: 'asset', assetId: asset.id }, parent)
+    upload(
+      asset.managedName || asset.id.endsWith('-thumbnail') ? asset.name : imageFileName(asset),
+      asset.blob,
+      { kind: 'asset', assetId: asset.id },
+      parent,
+    )
   );
 }
 export async function uploadRevision(revision) {

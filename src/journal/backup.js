@@ -31,10 +31,13 @@ export function parseArchive(bytes) {
       const r = validateRevision(raw);
       delete r.sheetSaved;
       delete r.driveId;
+      delete r.remoteKnown;
+      delete r.entry.removedImages;
       for (const image of r.entry.images) {
         const data = files[`attachments/${imageFileName(image)}`];
         if (!data) throw new Error(`사진 원본 누락: ${image.name}`);
         delete image.driveId;
+        delete image.thumbnail;
         assets.set(image.id, { ...image, blob: new Blob([data], { type: image.type }) });
       }
       revisions.push(r);

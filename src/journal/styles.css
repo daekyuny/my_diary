@@ -2049,3 +2049,19 @@ dialog::backdrop {
     padding-bottom: max(12px, env(safe-area-inset-bottom));
   }
 }
+
+.photo-preview {
+  display: block;
+  border: 0;
+  padding: 0;
+  width: 100%;
+  background: transparent;
+  cursor: zoom-in;
+}
+.original-photo {
+  display: block;
+  max-width: 100%;
+  max-height: 75vh;
+  object-fit: contain;
+  margin: auto;
+}

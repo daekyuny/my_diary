@@ -201,3 +201,22 @@ test('manual save stays disabled until changed and closing unsaved edits asks fo
   await page.locator('#entry-title').fill('저장한 제목');
   await expect(page.locator('#save')).toBeDisabled();
 });
+
+test('creating a field inside a diary attaches its input and preserves its value', async ({
+  page,
+}) => {
+  await newEntry(page);
+  await page.locator('#entry-title').fill('날씨 기록');
+  await page.locator('#add-field').click();
+  await page.locator('#create-field-here').click();
+  await page.locator('#definition-name').fill('날씨');
+  await page.locator('#definition-form button[type=submit]').click();
+  await expect(page.locator('#small-dialog')).not.toBeVisible();
+  await expect(page.locator('#fields label')).toHaveText('날씨');
+  await page.locator('[data-field-value]').fill('맑음');
+  await saveClose(page);
+  await page.reload();
+  await page.locator('.record').click();
+  await expect(page.locator('#fields label')).toHaveText('날씨');
+  await expect(page.locator('[data-field-value]')).toHaveValue('맑음');
+});
