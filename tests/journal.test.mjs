@@ -6,7 +6,7 @@ import { visibleGroups, validateDefinition, cards, escape } from '../src/journal
 import { parseArchive } from '../src/journal/backup.js';
 import { zipSync, strToU8 } from 'fflate';
 
-test('sheet records split long bodies and preserve user field IDs and typed values without formulas', () => {
+test('sheet records split long bodies and keep metadata inline without custom fields', () => {
   const e = {
     ...newEntry('2026-08-07'),
     title: '=IMPORTXML("x")',
@@ -16,11 +16,11 @@ test('sheet records split long bodies and preserve user field IDs and typed valu
   const r = makeRevision(e),
     encoded = encodeRevision(r),
     decoded = decodeIndex(encoded[0]);
-  assert.equal(encoded[0][0].slice(10).join(''), e.body);
+  assert.equal(encoded[0][0].slice(10, 14).join(''), e.body);
   assert.equal(decoded[0].entry.title, e.title);
   assert.equal(decoded[0].summary, true);
-  assert.equal(encoded[1][0][1], 'field:place');
-  assert.equal(JSON.parse(encoded[1][0][2]).value, '서울');
+  assert.deepEqual(encoded[1], []);
+  assert.equal(JSON.parse(encoded[0][0][14]).fields, undefined);
   assert.throws(() => encodeRevision(makeRevision({ ...e, body: 'a'.repeat(120001) })));
 });
 test('duplicate retry IDs produce one revision while concurrent edits remain separate heads', () => {
@@ -32,7 +32,7 @@ test('duplicate retry IDs produce one revision while concurrent edits remain sep
   assert.equal(index.length, 3);
   assert.equal(entryGroups(index)[0].heads.length, 2);
 });
-test('views filter the same data by date, user field, labels and archive', () => {
+test('views filter the same data by date, labels and archive', () => {
   const revisions = [
     makeRevision({
       ...newEntry('2026-08-07'),
@@ -42,7 +42,7 @@ test('views filter the same data by date, user field, labels and archive', () =>
     makeRevision({ ...newEntry('2026-08-08'), title: '보관', archived: true }),
   ];
   const groups = entryGroups(revisions);
-  assert.equal(visibleGroups(groups, { query: '서울' }).length, 1);
+  assert.equal(visibleGroups(groups, { query: '산책' }).length, 1);
   assert.equal(visibleGroups(groups, { collection: 'archive' })[0].latest.entry.title, '보관');
   assert.equal(visibleGroups(groups, { day: '2026-08-08' }).length, 0);
   assert.equal(visibleGroups(groups, { month: '2026-08' }).length, 1);
@@ -75,4 +75,14 @@ test('Keep import filters My Diary and preserves source without reading the priv
   assert.equal(result.revisions.length, 1);
   assert.equal(result.revisions[0].entry.date, '2026-08-07');
   assert.deepEqual(result.revisions[0].entry.tags, ['여행']);
+});
+
+import { recentIds } from '../src/journal/cache.js';
+test('recent cache follows diary date rather than modification time and excludes trash', () => {
+  const old = makeRevision(newEntry('2000-01-01'));
+  const recent = makeRevision(newEntry('2026-01-01'));
+  old.savedAt = '2099-01-01T00:00:00Z';
+  assert.deepEqual([...recentIds([old, recent], 1)], [recent.id]);
+  recent.entry.deletedAt = '2026-01-02T00:00:00Z';
+  assert.deepEqual([...recentIds([old, recent], 1)], [old.id]);
 });

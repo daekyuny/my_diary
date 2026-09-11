@@ -1,5 +1,6 @@
+import { recentIds } from './cache.js';
 import { icon, hydrateIcons } from './icons.js';
-import { escape, visibleGroups, cards, calendarHTML, validateDefinition } from './views.js';
+import { escape, visibleGroups, cards, calendarHTML } from './views.js';
 import { SheetsRepository, findSheets, createSheet, initializeSheet } from './sheets.js';
 import { parseArchive, stableKeepIds, makeBackup } from './backup.js';
 import { newEntry, localDate, validDate, makeRevision, mergeEvents } from '../model.js';
@@ -20,10 +21,10 @@ try {
 let account = settings.account || null,
   repository = null,
   groups = [],
-  definitions = [],
   entry = null,
   parents = [],
   activeRevision = '',
+  conflictingRevision = null,
   dirty = false,
   busy = false,
   editing = true,
@@ -85,7 +86,6 @@ function locks(value) {
     'import',
     'export',
     'move-local',
-    'new-definition',
     'purge-trash',
     'save-retention',
   ])
@@ -178,6 +178,9 @@ function connection() {
         ? '기존 시트를 선택해 연결해주세요.'
         : '아직 시트가 연결되지 않았습니다. 새 My Diary 시트 만들기를 눌러주세요.';
   if (repository) $('#open-sheet').href = repository.url;
+  $('#migration-status').textContent = repository?.migrated
+    ? '사진·일정 연결 정보 이관 완료 · 추가항목 워크시트를 삭제해도 됩니다.'
+    : '시트 연결 후 추가항목 정보 이관 여부를 확인합니다.';
   if (!$('#settings-dialog').open)
     $('#trash-days').value = String(repository?.retentionDays ?? settings.trashDays ?? 30);
   $('#move-local').hidden = !account || !repository;
@@ -300,10 +303,6 @@ async function hydrate(revision) {
 async function refresh() {
   if (!repository || !google.connected() || !navigator.onLine) return;
   const remote = await repository.list();
-  definitions = repository.settings;
-  settings.definitions ||= {};
-  settings.definitions[account.permissionId] = definitions;
-  persistSettings();
   const local = new Map((await store.all('revisions')).map((r) => [r.id, r]));
   const current = new Set(remote.map((r) => r.id));
   for (const r of local.values())
@@ -319,6 +318,23 @@ async function refresh() {
         ? { ...existing, sheetSaved: true, row: revision.row, tab: revision.tab }
         : revision,
     );
+  }
+  const recent = recentIds(remote);
+  const missing = remote.filter(
+    (r) => recent.has(r.id) && (!local.has(r.id) || local.get(r.id).summary),
+  );
+  for (let i = 0; i < missing.length; i += 20) {
+    const full = await repository.readMany(missing.slice(i, i + 20));
+    for (const revision of full) await store.mergeRemoteRevision(revision);
+  }
+  const drafts = new Set((await store.all('drafts')).map((d) => d.entry.id));
+  for (const revision of remote) {
+    if (
+      !recent.has(revision.id) &&
+      entry?.id !== revision.entry.id &&
+      !drafts.has(revision.entry.id)
+    )
+      await store.mergeRemoteRevision(revision);
   }
   await load();
   lastRefresh = Date.now();
@@ -348,6 +364,9 @@ async function save(sync = true, commit = false) {
     const revision = {
       ...makeRevision(entry, parents),
       remoteKnown: Boolean(previous?.sheetSaved || previous?.remoteKnown),
+      baseRevision: previous?.sheetSaved
+        ? previous.id
+        : previous?.baseRevision || previous?.parents?.[0],
     };
     await store.replaceCurrent(revision);
     activeRevision = revision.id;
@@ -371,7 +390,9 @@ function syncCloud() {
     let saved = false;
     do {
       syncAgain = false;
-      const pending = (await store.all('revisions')).filter((r) => !r.sheetSaved && !r.summary);
+      const pending = (await store.all('revisions')).filter(
+        (r) => !r.sheetSaved && !r.summary && !r.conflict,
+      );
       syncImages = pending.flatMap((r) => r.entry.images);
       for (let offset = 0; offset < pending.length;) {
         const batch = [];
@@ -403,7 +424,17 @@ function syncCloud() {
         }
         syncProgress = `이번 묶음 ${batch.length}개를 Sheets에 저장하고 있습니다. 전체 저장 대기 ${pending.length - offset + batch.length}개`;
         connection();
-        await repository.saveMany(batch);
+        try {
+          await repository.saveMany(batch);
+        } catch (error) {
+          if (error.conflict) {
+            const revision = batch.find((r) => r.id === error.localId);
+            await store.acknowledgeRevision({ ...revision, conflict: error.conflict });
+            await load();
+            syncAgain = true;
+          }
+          throw error;
+        }
         for (const revision of batch) {
           delete revision.entry.removedImages;
           await store.acknowledgeRevision({ ...revision, sheetSaved: true, remoteKnown: true });
@@ -412,12 +443,18 @@ function syncCloud() {
         await load();
       }
       await load();
-    } while (syncAgain || (await store.all('revisions')).some((r) => !r.sheetSaved && !r.summary));
+    } while (
+      syncAgain ||
+      (await store.all('revisions')).some((r) => !r.sheetSaved && !r.summary && !r.conflict)
+    );
     if (!entry && !busy) await refresh();
     syncImages = [];
     await cleanLocalPhotos(entry?.images || []);
-    syncProgress = '';
-    $('#cloud-error').hidden = true;
+    const conflicts = (await store.all('revisions')).filter((r) => r.conflict);
+    syncProgress = conflicts.length
+      ? `${conflicts.length}개 일기에 수정 충돌이 있습니다. 해당 일기를 열어 확인해주세요.`
+      : '';
+    $('#cloud-error').hidden = !conflicts.length;
     if (saved && !syncAgain) toast('Google Sheets에 저장했습니다.');
   })()
     .catch((error) => {
@@ -451,6 +488,7 @@ async function openEntry(id, date = day || localDate()) {
   await save(false);
   const group = groups.find((g) => g.latest.entry.id === id);
   const revision = group ? await hydrate(group.latest) : null;
+  conflictingRevision = revision?.conflict ? revision : null;
   entry = revision ? structuredClone(revision.entry) : { ...newEntry(date), fields: [] };
   parents = revision ? [revision.id] : [];
   activeRevision = revision?.id || '';
@@ -468,30 +506,8 @@ async function openEntry(id, date = day || localDate()) {
   if (!$('#editor-dialog').open) $('#editor-dialog').showModal();
   desiredFocus = editing ? $('#entry-title') : $('#edit-entry');
 }
-function fieldDefinition(field) {
-  return definitions.find((d) => d.id === field.id) || { ...field, type: 'text', options: [] };
-}
-function renderFields() {
-  $('#fields-empty').hidden = Boolean(entry.fields?.length);
-  $('#fields').innerHTML = (entry.fields || [])
-    .map((field, i) => {
-      const def = { ...fieldDefinition(field) };
-      if (
-        !['text', 'number', 'date', 'select'].includes(def.type) ||
-        (def.type === 'date' && field.value && !validDate(field.value)) ||
-        (def.type === 'number' && field.value && !Number.isFinite(Number(field.value)))
-      )
-        def.type = 'text';
-      const id = `field-value-${i}`;
-      const input =
-        def.type === 'select'
-          ? `<select id="${id}" data-field-value="${i}"><option value="">선택 안 함</option>${[...new Set([...(def.options || []), ...(field.value ? [field.value] : [])])].map((option) => `<option value="${escape(option)}" ${option === field.value ? 'selected' : ''}>${escape(option)}</option>`).join('')}</select>`
-          : `<input id="${id}" data-field-value="${i}" type="${def.type || 'text'}" value="${escape(field.value)}" ${def.type === 'number' ? 'step="any"' : ''}/>`;
-      return `<div class="field-row"><label for="${id}">${escape(def.name)}</label>${input}<button type="button" data-remove-field="${i}" aria-label="${escape(def.name)} 항목 제거">${icon('close')}</button></div>`;
-    })
-    .join('');
-}
 function renderReading() {
+  $('#resolve-conflict').hidden = !conflictingRevision;
   $('#editor-form').classList.toggle('reading', !editing);
   $('#reading-title').textContent = entry.title || '제목 없는 일기';
   $('#reading-date').textContent = entry.date;
@@ -500,16 +516,35 @@ function renderReading() {
     entry.tags.length
       ? `<p class="reading-tags">${entry.tags.map((tag) => escape('#' + tag)).join(' ')}</p>`
       : '',
-    ...(entry.fields || []).map(
-      (field) =>
-        `<p><strong>${escape(fieldDefinition(field).name)}</strong> ${escape(field.value || '—')}</p>`,
-    ),
     ...(entry.calendarTemplate === false ? [] : entry.events).map(
       (event) =>
         `<article class="reading-event"><h2>${escape(event.title)}</h2><small>${escape(event.allDay ? '종일' : event.start ? new Date(event.start).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '')} ${escape(event.location || '')}</small><p>${escape(event.note || '')}</p></article>`,
     ),
   ].join('');
 }
+$('#resolve-conflict').onclick = () => {
+  const revision = conflictingRevision;
+  small(
+    '양쪽에서 수정된 일기',
+    `<p>같은 일기가 다른 기기에서도 수정됐습니다. 기기 수정본과 시트 기록을 별도로 보존할 수 있습니다.</p><h3>이 기기</h3><pre>${escape(revision.entry.body)}</pre><h3>시트</h3><pre>${escape(revision.conflict.entry.body)}</pre><button id="keep-conflict-copy" class="primary">기기 수정본을 별도 일기로 보존</button>`,
+  );
+  $('#keep-conflict-copy').onclick = () =>
+    task(async () => {
+      if (dirty) throw new Error('편집 중인 내용을 먼저 저장하거나 닫은 후 충돌을 확인해주세요.');
+      const copy = makeRevision({
+        ...revision.entry,
+        id: crypto.randomUUID(),
+        title: `${revision.entry.title || '제목 없는 일기'} (기기 수정본)`,
+      });
+      await store.put('revisions', copy);
+      await store.replaceCurrent(revision.conflict);
+      conflictingRevision = null;
+      $('#small-dialog').close();
+      await closeEditor();
+      await load();
+      await save();
+    });
+};
 $('#edit-entry').onclick = () => {
   editing = true;
   renderReading();
@@ -529,7 +564,6 @@ function fillEditor() {
   $('#pin-entry').setAttribute('aria-label', entry.pinned ? '상단 고정 해제' : '상단 고정');
   $('#archive-entry span:last-child').textContent = entry.archived ? '복원하기' : '삭제하기';
   $('#word-count').textContent = `${entry.body.length.toLocaleString()}자`;
-  renderFields();
   renderEvents();
   renderPhotos();
   connection();
@@ -588,88 +622,23 @@ function small(title, html) {
 }
 function openSettings() {
   $('#setting-client').value = settings.googleClientId || '';
-  renderDefinitions();
   connection();
   $('#settings-dialog').showModal();
-}
-function renderDefinitions() {
-  $('#definitions').innerHTML = definitions.length
-    ? definitions
-        .map(
-          (def) =>
-            `<div class="definition ${def.hidden ? 'inactive' : ''}"><div><strong>${escape(def.name)}</strong><small>${{ text: '텍스트', number: '숫자', date: '날짜', select: '선택 목록' }[def.type]}${def.hidden ? ' · 숨김' : ''}</small></div><button data-edit-definition="${escape(def.id)}">수정</button><button data-hide-definition="${escape(def.id)}">${def.hidden ? '다시 사용' : '숨기기'}</button></div>`,
-        )
-        .join('')
-    : '<p class="muted">아직 정한 항목이 없습니다. 자주 기록할 정보를 추가해보세요.</p>';
-}
-async function saveDefinition(def) {
-  validateDefinition(def);
-  if (account) {
-    if (!repository || !google.connected())
-      throw new Error('항목 설정을 다른 기기와 함께 쓰려면 Google에 다시 연결해주세요.');
-    await repository.saveField(def);
-  }
-  definitions = [...definitions.filter((d) => d.id !== def.id), def];
-  settings.definitions ||= {};
-  settings.definitions[account?.permissionId || 'local'] = definitions;
-  persistSettings();
-  renderDefinitions();
-  if (entry) renderFields();
-}
-function definitionDialog(
-  def = { id: crypto.randomUUID(), name: '', type: 'text', options: [] },
-  attach = false,
-) {
-  small(
-    '추가 항목 설정',
-    `<form id="definition-form"><label class="form-label">항목 이름<input id="definition-name" value="${escape(def.name)}" placeholder="예: 장소, 읽은 책, 운동 시간" maxlength="50" required/></label><label class="form-label">입력 방식<select id="definition-type">${[
-      ['text', '텍스트'],
-      ['number', '숫자'],
-      ['date', '날짜'],
-      ['select', '선택 목록'],
-    ]
-      .map(
-        ([value, label]) =>
-          `<option value="${value}" ${value === def.type ? 'selected' : ''}>${label}</option>`,
-      )
-      .join(
-        '',
-      )}</select></label><label id="definition-options-label" class="form-label" ${def.type !== 'select' ? 'hidden' : ''}>선택지 · 쉼표로 구분<input id="definition-options" value="${escape((def.options || []).join(', '))}" placeholder="서울, 부산, 제주"/></label><p>항목 이름은 기존 기록에도 반영됩니다. 입력 방식을 바꾸어도 저장된 값은 보존합니다.</p><button class="primary" type="submit">항목 저장</button></form>`,
-  );
-  $('#definition-type').onchange = () =>
-    ($('#definition-options-label').hidden = $('#definition-type').value !== 'select');
-  $('#definition-form').onsubmit = (event) => {
-    event.preventDefault();
-    task(async () => {
-      const next = {
-        ...def,
-        name: $('#definition-name').value.trim(),
-        type: $('#definition-type').value,
-        options: [
-          ...new Set(
-            $('#definition-options')
-              .value.split(',')
-              .map((v) => v.trim())
-              .filter(Boolean),
-          ),
-        ],
-      };
-      await saveDefinition(next);
-      if (attach && entry && !entry.fields?.some((field) => field.id === next.id)) {
-        entry.fields ||= [];
-        entry.fields.push({ id: next.id, name: next.name, value: '' });
-        changed();
-        renderFields();
-      }
-      $('#small-dialog').close();
-      if (attach) $('#fields input:last-of-type, #fields select:last-of-type')?.focus();
-    });
-  };
 }
 async function selectRepository(id, closeSettings = true) {
   const candidate = new SheetsRepository(id);
   await candidate.prepare();
-  await candidate.compact();
+  if (!candidate.migrated) {
+    await candidate.migrate();
+    await candidate.compact();
+  } else {
+    await candidate.list();
+    if (
+      candidate.rawRows.some((row) => !row.some((v) => v !== '' && v != null)) ||
+      candidate.rawIndex.length !== candidate.index.length
+    )
+      await candidate.compact();
+  }
   await save(false);
   const previousOwner = owner();
   const unattached = previousOwner.endsWith('-unassigned')
@@ -724,7 +693,6 @@ function connect(calendar = false, choose = false) {
       entry = null;
       repository = null;
       account = identity;
-      definitions = settings.definitions?.[identity.permissionId] || [];
       settings.account = identity;
       persistSettings();
       await store.openStore(owner());
@@ -775,7 +743,14 @@ function connect(calendar = false, choose = false) {
 }
 async function recover() {
   for (const draft of await store.all('drafts')) {
-    const revision = makeRevision(draft.entry, draft.parents);
+    const previous = (await store.all('revisions')).find((r) => r.entry.id === draft.entry.id);
+    const revision = {
+      ...makeRevision(draft.entry, draft.parents),
+      remoteKnown: Boolean(previous?.sheetSaved || previous?.remoteKnown),
+      baseRevision: previous?.sheetSaved
+        ? previous.id
+        : previous?.baseRevision || previous?.parents?.[0],
+    };
     await store.replaceCurrent(revision);
   }
 }
@@ -809,9 +784,20 @@ async function searchBodies() {
       '기기에 불러온 내용에서 검색합니다. 전체 본문은 Google 연결 후 검색할 수 있어요.';
     return;
   }
-  $('#search-state').textContent = '아직 불러오지 않은 본문도 검색하고 있어요…';
+  const bounds = filter();
+  if (!bounds.from && !bounds.to && !day) {
+    $('#search-state').textContent =
+      '전체 제목·미리보기와 기기에 보관된 본문에서 검색합니다. 과거 본문은 날짜를 좁혀 검색하거나 기록을 열어 확인하세요.';
+    return;
+  }
+  $('#search-state').textContent = '선택한 날짜 범위의 본문을 검색하고 있어요…';
   // Sequential requests avoid a burst across the per-user Sheets quota.
-  for (const revision of missing) {
+  for (const revision of missing.filter(
+    (r) =>
+      (!bounds.from || r.entry.date >= bounds.from) &&
+      (!bounds.to || r.entry.date <= bounds.to) &&
+      (!day || r.entry.date === day),
+  )) {
     if (generation !== searchGeneration) return;
     await hydrate(revision);
   }
@@ -979,50 +965,6 @@ $('#calendar').onclick = (e) => {
   } else if (e.target.closest('#clear-day')) day = '';
   render();
 };
-$('#fields').oninput = (e) => {
-  if (e.target.dataset.fieldValue !== undefined) {
-    entry.fields[Number(e.target.dataset.fieldValue)].value = e.target.value;
-    changed();
-  }
-};
-$('#fields').onchange = (e) => {
-  if (e.target.matches('select')) $('#fields').oninput(e);
-};
-$('#fields').onclick = (e) => {
-  const b = e.target.closest('[data-remove-field]');
-  if (b) {
-    entry.fields.splice(Number(b.dataset.removeField), 1);
-    changed();
-    renderFields();
-  }
-};
-$('#add-field').onclick = () => {
-  const available = definitions.filter(
-    (def) => !def.hidden && !entry.fields?.some((f) => f.id === def.id),
-  );
-  small(
-    '이 하루에 항목 추가',
-    available
-      .map(
-        (def) =>
-          `<button class="pick-field" data-add-field="${escape(def.id)}">${escape(def.name)}${icon('plus')}</button>`,
-      )
-      .join('') +
-      '<p>목록에 없는 항목은 설정 → 추가 항목 관리에서 만들 수 있습니다.</p><button id="create-field-here" class="primary">새 항목 만들기</button>',
-  );
-  $('#small-body').onclick = (e) => {
-    const b = e.target.closest('[data-add-field]');
-    if (b) {
-      const def = definitions.find((d) => d.id === b.dataset.addField);
-      entry.fields ||= [];
-      entry.fields.push({ id: def.id, name: def.name, value: '' });
-      changed();
-      renderFields();
-      $('#small-dialog').close();
-    }
-  };
-  $('#create-field-here').onclick = () => definitionDialog(undefined, true);
-};
 $('#events').oninput = (e) => {
   if (e.target.dataset.eventTitle !== undefined) {
     const item = entry.events[Number(e.target.dataset.eventTitle)];
@@ -1138,17 +1080,6 @@ $('#close-small').onclick = () => {
   $('#small-dialog').close();
   $('#small-body').onclick = null;
 };
-$('#new-definition').onclick = () => definitionDialog();
-$('#definitions').onclick = (e) => {
-  const edit = e.target.closest('[data-edit-definition]'),
-    hide = e.target.closest('[data-hide-definition]');
-  if (edit) definitionDialog(definitions.find((d) => d.id === edit.dataset.editDefinition));
-  if (hide)
-    task(() => {
-      const def = definitions.find((d) => d.id === hide.dataset.hideDefinition);
-      return saveDefinition({ ...def, hidden: !def.hidden });
-    });
-};
 $('#connect').onclick =
   $('#banner-connect').onclick =
   $('#settings-connect').onclick =
@@ -1188,10 +1119,8 @@ $('#disconnect').onclick = () =>
     entry = null;
     $('#editor-dialog').close();
     await store.openStore(owner());
-    definitions = settings.definitions?.local || [];
     await recover();
     await load();
-    renderDefinitions();
     $('#sheet-options').hidden = true;
     $('#sheet-select').innerHTML = '';
   });
@@ -1249,9 +1178,6 @@ $('#move-local').onclick = () =>
       assets = await store.all('assets');
     } finally {
       await store.openStore(currentOwner);
-    }
-    for (const def of settings.definitions?.local || []) {
-      if (!definitions.some((existing) => existing.id === def.id)) await saveDefinition(def);
     }
     for (const asset of assets) await store.put('assets', asset);
     for (const r of revisions)
@@ -1324,7 +1250,6 @@ async function start() {
   google.configureGoogle(settings.googleClientId, Boolean(settings.authServer));
   await store.openStore(owner());
   await recover();
-  definitions = settings.definitions?.[account?.permissionId || 'local'] || [];
   await load();
   if (account && settings.sheets?.[account.permissionId])
     repository = new SheetsRepository(settings.sheets[account.permissionId]);

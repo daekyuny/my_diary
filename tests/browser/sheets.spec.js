@@ -103,6 +103,7 @@ async function mock(context, state) {
         ],
       });
     if (url.pathname.endsWith('/values:batchGet')) {
+      (state.readRanges ||= []).push(...url.searchParams.getAll('ranges'));
       const ranges = url.searchParams.getAll('ranges');
       const col = (letters) => [...letters].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0) - 1;
       return send({
@@ -176,9 +177,10 @@ async function mock(context, state) {
           const tab = Object.values(state.tabs).find((t) => t.id === sheetId);
           if (update.start) {
             update.rows.forEach((row, i) => {
-              tab.rows[update.start.rowIndex + i] = row.values.map(
-                (v) => v.userEnteredValue.stringValue,
-              );
+              const target = (tab.rows[update.start.rowIndex + i] ||= []);
+              row.values.forEach((v, j) => {
+                target[(update.start.columnIndex || 0) + j] = v.userEnteredValue.stringValue;
+              });
             });
           } else {
             for (let i = update.range.startRowIndex; i < update.range.endRowIndex; i++)
@@ -317,7 +319,7 @@ test('trash restores, retention purges on demand, and another device drops remov
     await page.locator('#purge-trash').click();
     await expect(page.locator('#toast')).toContainText('1개 일기');
     await expect.poll(() => populated(state).length).toBe(0);
-    expect(state.tabs['추가항목'].rows.slice(1).filter((r) => r[0])).toHaveLength(0);
+    expect(state.tabs['추가항목']).toBeUndefined();
     await second.locator('#sync').click();
     await expect(second.locator('.record')).toHaveCount(0);
     await expect.poll(() => populated(state).length).toBe(0);
@@ -669,6 +671,201 @@ test('partially imported ZIP resumes the remaining local records after reload', 
     const rows = state.tabs['일기'].rows.slice(1).filter((r) => r[0]);
     expect(rows.length).toBe(25);
     expect(new Set(rows.map((r) => r[0])).size).toBe(25);
+  } finally {
+    await context.close();
+  }
+});
+
+async function seededState(count = 1, migrated = true) {
+  const { makeRevision, newEntry } = await import('../../src/model.js');
+  const { HEADERS, encodeRevision } = await import('../../src/journal/sheets.js');
+  const state = { exists: true, defaultDeleted: true, tabs: {} };
+  for (const [title, i] of [
+    ['일기', 0],
+    ['일정', 2],
+    ['설정', 3],
+    ['휴지통', 4],
+  ])
+    state.tabs[title] = { id: 100 + i, rows: [HEADERS[i]] };
+  state.tabs['설정'].rows.push(['format', 'my-diary-sheets-v1']);
+  if (migrated) state.tabs['설정'].rows.push(['inlineMetadata', 'v2']);
+  for (let i = 0; i < count; i++) {
+    const date = new Date(Date.UTC(2020, 0, i + 1)).toISOString().slice(0, 10);
+    const revision = makeRevision({ ...newEntry(date), title: `기록 ${i}`, body: `본문 ${i}` });
+    state.tabs['일기'].rows.push(encodeRevision(revision)[0][0]);
+  }
+  return state;
+}
+async function connectExisting(page) {
+  await page.goto('/');
+  await expect(page.locator('#banner-connect')).toBeEnabled();
+  await page.locator('#banner-connect').click();
+  await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+}
+
+test('legacy attachment metadata migrates once and the extra worksheet can be removed', async ({
+  browser,
+}) => {
+  const state = await seededState(1, false);
+  const row = state.tabs['일기'].rows[1];
+  row.length = 14;
+  const extra = {
+    images: [{ id: 'photo', name: 'photo.jpg', type: 'image/jpeg', driveId: 'asset-1' }],
+    source: { format: 'google-keep', path: 'Keep/a.json' },
+  };
+  state.tabs['추가항목'] = {
+    id: 101,
+    rows: [
+      ['저장 식별자', '항목', '값'],
+      [row[0], '@app', JSON.stringify(extra)],
+      [row[0], 'field:weather', '{"value":"맑음"}'],
+    ],
+  };
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await connectExisting(page);
+    expect(JSON.parse(row[14]).images).toEqual(extra.images);
+    expect(state.tabs['추가항목'].rows).toHaveLength(3);
+    delete state.tabs['추가항목'];
+    state.readRanges = [];
+    await page.reload();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    expect(state.readRanges.some((r) => r.includes('추가항목'))).toBe(false);
+    await settings(page);
+    await expect(page.locator('#migration-status')).toContainText('이관 완료');
+  } finally {
+    await context.close();
+  }
+});
+
+test('recent diary dates stay cached and only changed or opened historical bodies are fetched', async ({
+  browser,
+}) => {
+  const state = await seededState(103);
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await connectExisting(page);
+    const details = () => state.readRanges.filter((r) => /^'일기'!A\d+:O\d+$/.test(r));
+    expect(details()).toHaveLength(100);
+    expect(details()).not.toContain("'일기'!A2:O2");
+    expect(state.writeRequests || 0).toBe(0);
+    state.readRanges = [];
+    await page.reload();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    expect(details()).toHaveLength(0);
+    const changed = state.tabs['일기'].rows[103];
+    changed[0] = 'remote-new-revision';
+    changed[3] = new Date().toISOString();
+    changed[6] = changed[10] = '다른 기기에서 변경한 본문';
+    state.readRanges = [];
+    await page.locator('#sync').click();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    expect(details()).toEqual(["'일기'!A104:O104"]);
+    await page.getByRole('button', { name: '캘린더 보기', exact: true }).click();
+    await page.locator('#calendar-month').fill('2020-01');
+    await page.locator('[data-day="2020-01-01"]').click();
+    state.readRanges = [];
+    await page.locator('.record').click();
+    await expect(page.locator('#reading-body')).toHaveText('본문 0');
+    expect(details()).toEqual(["'일기'!A2:O2"]);
+  } finally {
+    await context.close();
+  }
+});
+
+test('concurrent edits preserve both versions until the local copy is explicitly kept', async ({
+  browser,
+}) => {
+  const state = await seededState();
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await connectExisting(page);
+    await page.locator('.record').click();
+    await page.locator('#edit-entry').click();
+    await page.locator('#entry-body').fill('이 기기 수정');
+    const row = state.tabs['일기'].rows[1];
+    row[0] = 'other-device-revision';
+    row[3] = new Date().toISOString();
+    row[6] = row[10] = '다른 기기 수정';
+    await page.locator('#save').click();
+    await expect(page.locator('#connection')).toHaveText('클라우드 저장 대기');
+    expect(row[10]).toBe('다른 기기 수정');
+    await page.locator('.record').click();
+    await expect(page.locator('#reading-body')).toHaveText('이 기기 수정');
+    await page.locator('#resolve-conflict').click();
+    await expect(page.locator('#small-body')).toContainText('다른 기기 수정');
+    await page.locator('#keep-conflict-copy').click();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    expect(
+      populated(state)
+        .map((r) => r[10])
+        .sort(),
+    ).toEqual(['다른 기기 수정', '이 기기 수정'].sort());
+  } finally {
+    await context.close();
+  }
+});
+
+test('pending historical edits upload while a different remote diary refreshes locally', async ({
+  browser,
+}) => {
+  const state = await seededState(102);
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await connectExisting(page);
+    await page.getByRole('button', { name: '캘린더 보기', exact: true }).click();
+    await page.locator('#calendar-month').fill('2020-01');
+    await page.locator('[data-day="2020-01-01"]').click();
+    await page.locator('.record').click();
+    await page.locator('#edit-entry').click();
+    await page.locator('#entry-body').fill('과거 일기의 미전송 수정');
+    state.failWrites = true;
+    await page.locator('#save').click();
+    await expect(page.locator('#connection')).toHaveText('클라우드 저장 대기');
+    const changed = state.tabs['일기'].rows[102];
+    changed[0] = 'changed-elsewhere';
+    changed[3] = new Date().toISOString();
+    changed[6] = changed[10] = '다른 기기의 최신 내용';
+    state.failWrites = false;
+    await page.reload();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    expect(state.tabs['일기'].rows[1][10]).toBe('과거 일기의 미전송 수정');
+    await page.getByRole('button', { name: '목록 보기', exact: true }).click();
+    await page.locator('.record').filter({ hasText: '기록 101' }).click();
+    await expect(page.locator('#reading-body')).toHaveText('다른 기기의 최신 내용');
+  } finally {
+    await context.close();
+  }
+});
+
+test('pre-login diaries still move into the connected sheet without custom fields', async ({
+  browser,
+}) => {
+  const state = { exists: false, tabs: {} };
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await page.goto('/');
+    await page.locator('#quick-entry').click();
+    await page.locator('#entry-title').fill('연결 전 일기');
+    await page.locator('#save').click();
+    await expect(page.locator('#editor-dialog')).not.toBeVisible();
+    await page.locator('#banner-connect').click();
+    await page.locator('#create-sheet').click();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    await settings(page);
+    await page.locator('#move-local').click();
+    await expect.poll(() => populated(state).length).toBe(1);
+    expect(populated(state)[0][5]).toBe('연결 전 일기');
   } finally {
     await context.close();
   }

@@ -20,6 +20,7 @@ export const HEADERS = [
     '본문 2',
     '본문 3',
     '본문 4',
+    '앱 연결 정보',
   ],
   ['저장 식별자', '항목', '값'],
   ['저장 식별자', '일정 ID', '일정 데이터'],
@@ -41,21 +42,13 @@ export function encodeRevision(revision) {
   if (e.body.length > 120000)
     throw new Error('일기 한 편은 12만 자까지 저장할 수 있습니다. 나누어 기록해주세요.');
   const chunks = Array.from({ length: 4 }, (_, i) => e.body.slice(i * 30000, (i + 1) * 30000));
-  const fields = (e.fields || []).map((field) => [
-    revision.id,
-    `field:${field.id || field.name}`,
-    JSON.stringify(field),
-  ]);
-  // Separate metadata rows keep the body readable in Sheets and preserve attachments/import details.
+  // Keep attachment and event metadata with its diary so detail reads need one row.
   const extra = Object.fromEntries(
     Object.entries(e).filter(
       ([key]) =>
-        !['id', 'date', 'title', 'body', 'tags', 'pinned', 'archived', 'fields', 'events'].includes(
-          key,
-        ),
+        !['id', 'date', 'title', 'body', 'tags', 'pinned', 'archived', 'fields'].includes(key),
     ),
   );
-  fields.push([revision.id, '@app', JSON.stringify(extra)]);
   const result = [
     [
       [
@@ -70,13 +63,14 @@ export function encodeRevision(revision) {
         String(Boolean(e.pinned)),
         e.deletedAt || '',
         ...chunks,
+        JSON.stringify(extra),
       ],
     ],
-    fields,
+    [],
     e.events.map((event) => [revision.id, event.key, JSON.stringify(event)]),
   ];
   if (result.flat(2).some((value) => String(value).length > 45000))
-    throw new Error('추가 항목 또는 일정 한 개의 내용이 너무 깁니다.');
+    throw new Error('사진 연결 정보 또는 일정 한 개의 내용이 너무 깁니다.');
   return result;
 }
 export function decodeIndex(rows) {
@@ -113,7 +107,6 @@ export class SheetsRepository {
     this.tabs = null;
     this.index = [];
     this.cache = new Map();
-    this.settings = [];
     this.retentionDays = 30;
     this.rawIndex = [];
   }
@@ -129,14 +122,16 @@ export class SheetsRepository {
   }
   async prepare() {
     const data = await json(`sheets/v4/spreadsheets/${this.id}?fields=sheets.properties`);
+    this.properties = data.sheets.map((s) => s.properties);
     this.tabs = TABS.map(
       (title) => data.sheets.find((sheet) => sheet.properties.title === title)?.properties.sheetId,
     );
-    if (this.tabs.slice(0, 4).some((id) => id === undefined))
+    if ([0, 2, 3].some((i) => this.tabs[i] === undefined))
       throw new Error(
         'My Diary 시트의 필수 탭을 찾지 못했습니다. 설정에서 올바른 파일을 선택해주세요.',
       );
-    const [settings] = await this.values(["'설정'!A1:B3"]);
+    const [settings] = await this.values(["'설정'!A1:B"]);
+    this.migrated = settings.some((r) => r[0] === 'inlineMetadata' && r[1] === 'v2');
     if (!settings.some((row) => row[0] === 'format' && row[1] === 'my-diary-sheets-v1'))
       throw new Error('My Diary 형식으로 만든 시트가 아닙니다. 다른 파일에는 기록하지 않습니다.');
     if (this.tabs[4] === undefined) {
@@ -150,6 +145,82 @@ export class SheetsRepository {
       await this.prepare();
     }
   }
+  async migrate() {
+    if (!this.tabs) await this.prepare();
+    if (this.migrated) return;
+    await withSheetLock(this.id, async (renew) => {
+      this.renewLease = renew;
+      try {
+        await this.prepare();
+        if (this.migrated) return;
+        // Existing grids may have exactly 14 columns.
+        await this.write(
+          [0, 4]
+            .filter(
+              (tab) =>
+                (this.properties.find((p) => p.sheetId === this.tabs[tab])?.gridProperties
+                  ?.columnCount || 0) < 15,
+            )
+            .map((tab) => ({
+              updateSheetProperties: {
+                properties: { sheetId: this.tabs[tab], gridProperties: { columnCount: 15 } },
+                fields: 'gridProperties.columnCount',
+              },
+            })),
+        );
+        const [diaries, trash, events, legacy = []] = await this.values([
+          "'일기'!A2:O",
+          "'휴지통'!A2:O",
+          "'일정'!A2:C",
+          ...(this.tabs[1] === undefined ? [] : ["'추가항목'!A2:C"]),
+        ]);
+        const extras = new Map(
+          legacy.filter((r) => r[1] === '@app').map((r) => [r[0], JSON.parse(r[2] || '{}')]),
+        );
+        const requests = [];
+        for (const [rows, tab] of [
+          [diaries, 0],
+          [trash, 4],
+        ]) {
+          requests.push({
+            updateCells: {
+              start: { sheetId: this.tabs[tab], rowIndex: 0, columnIndex: 14 },
+              rows: [cells(['앱 연결 정보'])],
+              fields: 'userEnteredValue',
+            },
+          });
+          rows.forEach((row, i) => {
+            if (!row[0] || row[14]) return;
+            const extra = {
+              ...extras.get(row[0]),
+              events: events.filter((e) => e[0] === row[0]).map((e) => JSON.parse(e[2])),
+            };
+            delete extra.fields;
+            requests.push({
+              updateCells: {
+                start: { sheetId: this.tabs[tab], rowIndex: i + 1, columnIndex: 14 },
+                rows: [cells([JSON.stringify(extra)])],
+                fields: 'userEnteredValue',
+              },
+            });
+          });
+        }
+        for (let i = 0; i < requests.length; i += 20) await this.write(requests.slice(i, i + 20));
+        await this.write([
+          {
+            appendCells: {
+              sheetId: this.tabs[3],
+              rows: [cells(['inlineMetadata', 'v2'])],
+              fields: 'userEnteredValue',
+            },
+          },
+        ]);
+        this.migrated = true;
+      } finally {
+        this.renewLease = null;
+      }
+    });
+  }
   async list() {
     if (!this.tabs) await this.prepare();
     const [rows, settings, trash] = await this.values([
@@ -157,13 +228,6 @@ export class SheetsRepository {
       "'설정'!A2:B",
       "'휴지통'!A2:J",
     ]);
-    this.settings = [
-      ...new Map(
-        settings
-          .filter((row) => row[0]?.startsWith('field:'))
-          .map((row) => [row[0], JSON.parse(row[1])]),
-      ).values(),
-    ];
     this.retentionDays = Number(settings.filter((r) => r[0] === 'trashDays').at(-1)?.[1] ?? 30);
     this.rawRows = rows;
     this.rawIndex = [
@@ -178,10 +242,8 @@ export class SheetsRepository {
   async read(revision) {
     if (!revision.summary) return revision;
     if (this.cache.has(revision.id)) return structuredClone(this.cache.get(revision.id));
-    const [rows, fields, events] = await this.values([
-      `'${TABS[revision.tab || 0]}'!A${revision.row}:N${revision.row}`,
-      "'추가항목'!A2:C",
-      "'일정'!A2:C",
+    const [rows] = await this.values([
+      `'${TABS[revision.tab || 0]}'!A${revision.row}:O${revision.row}`,
     ]);
     if (rows[0]?.[0] !== revision.id) {
       await this.list();
@@ -189,40 +251,40 @@ export class SheetsRepository {
       if (!found) throw new Error('일기가 시트에서 이동되거나 삭제되었습니다. 다시 불러와주세요.');
       return this.read(found);
     }
+    return this.decodeFull(revision, rows[0]);
+  }
+  decodeFull(revision, row) {
     const result = structuredClone(revision),
       e = result.entry;
-    e.body = Array.from({ length: 4 }, (_, i) => rows[0][10 + i] || '').join('');
+    e.body = Array.from({ length: 4 }, (_, i) => row[10 + i] || '').join('');
+    const extra = JSON.parse(row[14] || '{}');
+    for (const key of [
+      'images',
+      'weather',
+      'source',
+      'calendarTemplate',
+      'removedEventKeys',
+      'events',
+    ])
+      if (extra[key] !== undefined) e[key] = extra[key];
     e.fields = [];
-    for (const row of fields.filter((row) => row[0] === revision.id)) {
-      if (row[1] === '@app') {
-        const extra = JSON.parse(row[2] || '{}');
-        for (const key of ['images', 'weather', 'source', 'calendarTemplate', 'removedEventKeys'])
-          if (extra[key] !== undefined) e[key] = extra[key];
-      } else if (row[1].startsWith('field:')) e.fields.push(JSON.parse(row[2]));
-      else e.fields.push({ id: row[1], name: row[1], value: row[2] || '' });
-    }
-    e.events = events.filter((row) => row[0] === revision.id).map((row) => JSON.parse(row[2]));
     delete result.summary;
     validateRevision(result);
     this.cache.set(result.id, result);
     return structuredClone(result);
   }
-  async saveField(field) {
-    if (!this.tabs) await this.prepare();
-    await json(
-      `sheets/v4/spreadsheets/${this.id}:batchUpdate`,
-      post({
-        requests: [
-          {
-            appendCells: {
-              sheetId: this.tabs[3],
-              rows: [cells([`field:${field.id}`, JSON.stringify(field)])],
-              fields: 'userEnteredValue',
-            },
-          },
-        ],
-      }),
+  async readMany(revisions) {
+    if (!revisions.length) return [];
+    const values = await this.values(
+      revisions.map((r) => `'${TABS[r.tab || 0]}'!A${r.row}:O${r.row}`),
     );
+    const result = [];
+    for (let i = 0; i < revisions.length; i++) {
+      if (values[i]?.[0]?.[0] === revisions[i].id)
+        result.push(this.decodeFull(revisions[i], values[i][0]));
+      else result.push(await this.read(revisions[i]));
+    }
+    return result;
   }
   async write(requests) {
     if (requests.length) {
@@ -258,21 +320,28 @@ export class SheetsRepository {
   async _compact() {
     await this.list();
     await this.write(
-      HEADERS.map((header, i) => ({
-        updateCells: {
-          start: { sheetId: this.tabs[i], rowIndex: 0, columnIndex: 0 },
-          rows: [cells(header)],
-          fields: 'userEnteredValue',
-        },
-      })),
+      HEADERS.flatMap((header, i) =>
+        i === 1
+          ? []
+          : [
+              {
+                updateCells: {
+                  start: { sheetId: this.tabs[i], rowIndex: 0, columnIndex: 0 },
+                  rows: [cells(header)],
+                  fields: 'userEnteredValue',
+                },
+              },
+            ],
+      ),
     );
     const keep = new Set(this.index.map((r) => r.id));
     const keepRows = new Set(this.index.map((r) => `${r.tab}:${r.row}`));
     const obsolete = this.rawIndex.filter((r) => !keepRows.has(`${r.tab}:${r.row}`));
     if (obsolete.length) {
       const ids = new Set(obsolete.filter((r) => !keep.has(r.id)).map((r) => r.id));
-      const [fields, events] = await this.values(["'추가항목'!A2:C", "'일정'!A2:C"]);
-      const requests = obsolete.map((r) => this.clearRow(r.tab || 0, r.row, 14));
+      const [events] = await this.values(["'일정'!A2:C"]);
+      const fields = [];
+      const requests = obsolete.map((r) => this.clearRow(r.tab || 0, r.row, 15));
       [fields, events].forEach((rows, i) =>
         rows.forEach((r, j) => {
           if (ids.has(r[0])) requests.push(this.clearRow(i + 1, j + 2, 3));
@@ -292,7 +361,7 @@ export class SheetsRepository {
           fields: 'userEnteredValue',
         },
       });
-      moves.push(this.clearRow(r.tab || 0, r.row, 14));
+      moves.push(this.clearRow(r.tab || 0, r.row, 15));
     }
     await this.write(moves);
     await this.cleanupAttachments();
@@ -308,9 +377,9 @@ export class SheetsRepository {
     await this.list();
   }
   async removeBlankRows() {
-    const tabs = [0, 1, 2, 4];
+    const tabs = [0, 2, 4];
     const values = await this.values(
-      tabs.map((tab) => `'${TABS[tab]}'!A2:${tab === 0 || tab === 4 ? 'N' : 'C'}`),
+      tabs.map((tab) => `'${TABS[tab]}'!A2:${tab === 0 || tab === 4 ? 'O' : 'C'}`),
     );
     const requests = [];
     values.forEach((rows, i) => {
@@ -338,12 +407,10 @@ export class SheetsRepository {
     await this.write(requests);
   }
   async cleanupAttachments() {
-    const [fields] = await this.values(["'추가항목'!A2:C"]);
-    const records = fields.map((row, i) => ({
-      row,
-      i,
-      extra: row[1] === '@app' ? JSON.parse(row[2] || '{}') : null,
-    }));
+    const values = await this.values(["'일기'!O2:O", "'휴지통'!O2:O"]);
+    const records = values.flatMap((rows, t) =>
+      rows.map((row, i) => ({ i, tab: t ? 4 : 0, extra: JSON.parse(row[0] || '{}') })),
+    );
     const referenced = new Set(
       records.flatMap(({ extra }) =>
         (extra?.images || [])
@@ -352,7 +419,7 @@ export class SheetsRepository {
       ),
     );
     const updates = [];
-    for (const { row, i, extra } of records) {
+    for (const { i, tab, extra } of records) {
       if (!extra?.removedImages?.length) continue;
       for (const image of extra.removedImages) {
         if (this.renewLease) await this.renewLease();
@@ -368,8 +435,8 @@ export class SheetsRepository {
       delete extra.removedImages;
       updates.push({
         updateCells: {
-          start: { sheetId: this.tabs[1], rowIndex: i + 1, columnIndex: 0 },
-          rows: [cells([row[0], '@app', JSON.stringify(extra)])],
+          start: { sheetId: this.tabs[tab], rowIndex: i + 1, columnIndex: 14 },
+          rows: [cells([JSON.stringify(extra)])],
           fields: 'userEnteredValue',
         },
       });
@@ -431,17 +498,32 @@ export class SheetsRepository {
     if (!this.tabs) await this.prepare();
     await this.list();
     if (this.index.some((r) => r.id === revision.id)) {
-      await this.cleanupAttachments();
+      if (revision.entry.removedImages?.length) await this.cleanupAttachments();
       return;
     }
     const previous = this.rawIndex.filter((r) => r.entry.id === revision.entry.id);
     if (!previous.length && revision.remoteKnown)
       throw new Error('이 일기는 다른 기기에서 완전 삭제되었습니다. 다시 저장할 수 없습니다.');
+    const latest = entryGroups(previous).map((g) => g.latest)[0];
+    if (
+      revision.remoteKnown &&
+      latest &&
+      latest.id !== revision.baseRevision &&
+      !revision.parents.includes(latest.id)
+    ) {
+      const error = new Error(
+        '같은 일기가 다른 기기에서도 수정되었습니다. 이 기기 수정본은 보존했습니다. 해당 일기를 열어 수정 충돌을 확인해주세요.',
+      );
+      error.localId = revision.id;
+      error.conflict = await this.read(latest);
+      throw error;
+    }
     const data = encodeRevision(revision);
     const target = revision.entry.deletedAt ? 4 : 0;
     const requests = [];
     const ids = new Set(previous.map((r) => r.id));
-    const [fields, events] = await this.values(["'추가항목'!A2:C", "'일정'!A2:C"]);
+    const [events] = await this.values(["'일정'!A2:C"]);
+    const fields = [];
     const slots = [
       previous.filter((r) => r.tab === target).map((r) => r.row),
       ...[fields, events].map((rows) => rows.flatMap((r, i) => (ids.has(r[0]) ? [i + 2] : []))),
@@ -467,13 +549,13 @@ export class SheetsRepository {
           });
       });
       for (const row of slots[tab].slice(rows.length))
-        requests.push(this.clearRow(actualTab, row, tab === 0 ? 14 : 3));
+        requests.push(this.clearRow(actualTab, row, tab === 0 ? 15 : 3));
     });
     for (const r of previous.filter((r) => r.tab !== target))
-      requests.push(this.clearRow(r.tab, r.row, 14));
+      requests.push(this.clearRow(r.tab, r.row, 15));
     await this.write(requests);
-    await this.cleanupAttachments();
-    await this.removeBlankRows();
+    if (revision.entry.removedImages?.length) await this.cleanupAttachments();
+    if (requests.some((r) => r.updateCells?.range)) await this.removeBlankRows();
   }
   async saveRetention(days) {
     if (![0, 7, 30, 90, 365].includes(days))
@@ -490,6 +572,8 @@ export class SheetsRepository {
     this.retentionDays = days;
   }
   async purge(days) {
+    await this.list();
+    if (!this.index.some((r) => expired(r.entry, days))) return [];
     return withSheetLock(this.id, async (renew) => {
       this.renewLease = renew;
       try {
@@ -503,21 +587,28 @@ export class SheetsRepository {
     await this.list();
     const ids = new Set(this.index.filter((r) => expired(r.entry, days)).map((r) => r.entry.id));
     const doomed = this.rawIndex.filter((r) => ids.has(r.entry.id));
+    if (!doomed.length) return [];
     const tokens = new Set(doomed.map((r) => r.id));
-    const [fields, events] = await this.values(["'추가항목'!A2:C", "'일정'!A2:C"]);
-    const photos = (rows) =>
-      rows
-        .filter((r) => r[1] === '@app')
-        .flatMap((r) =>
-          Object.values(JSON.parse(r[2] || '{}'))
-            .filter(Array.isArray)
-            .flat()
-            .filter((item) => item?.driveId),
-        )
-        .flatMap((image) => [image.driveId, image.thumbnail?.driveId])
-        .filter(Boolean);
-    const shared = new Set(photos(fields.filter((r) => !tokens.has(r[0]))));
-    for (const id of new Set(photos(fields.filter((r) => tokens.has(r[0]))))) {
+    const [events, active, trash] = await this.values([
+      "'일정'!A2:C",
+      "'일기'!O2:O",
+      "'휴지통'!O2:O",
+    ]);
+    const metadata = new Map(
+      this.rawIndex.map((r) => [
+        r.id,
+        JSON.parse((r.tab === 4 ? trash : active)[r.row - 2]?.[0] || '{}'),
+      ]),
+    );
+    const photos = (ids) =>
+      [...ids].flatMap((id) => {
+        const e = metadata.get(id) || {};
+        return [...(e.images || []), ...(e.removedImages || [])]
+          .flatMap((image) => [image.driveId, image.thumbnail?.driveId])
+          .filter(Boolean);
+      });
+    const shared = new Set(photos(this.rawIndex.filter((r) => !tokens.has(r.id)).map((r) => r.id)));
+    for (const id of new Set(photos(tokens))) {
       if (!shared.has(id)) {
         if (this.renewLease) await this.renewLease();
         try {
@@ -527,7 +618,8 @@ export class SheetsRepository {
         }
       }
     }
-    const requests = doomed.map((r) => this.clearRow(r.tab || 0, r.row, 14));
+    const fields = [];
+    const requests = doomed.map((r) => this.clearRow(r.tab || 0, r.row, 15));
     [fields, events].forEach((rows, tab) =>
       rows.forEach((r, i) => {
         if (tokens.has(r[0])) requests.push(this.clearRow(tab + 1, i + 2, 3));
@@ -593,6 +685,7 @@ export async function createSheet() {
   await initializeSheet(spreadsheet.id);
   const repository = new SheetsRepository(spreadsheet.id);
   await repository.prepare();
+  await repository.migrate();
   await repository.compact();
   return repository;
 }
@@ -602,6 +695,7 @@ export async function initializeSheet(id) {
   const requests = [];
   const used = new Set(meta.sheets.map((sheet) => sheet.properties.sheetId));
   TABS.forEach((title, i) => {
+    if (i === 1) return;
     const existing = meta.sheets?.find((sheet) => sheet.properties.title === title);
     if (existing) return;
     let sheetId = 100 + i;
@@ -614,7 +708,7 @@ export async function initializeSheet(id) {
           title,
           gridProperties: {
             rowCount: 1000,
-            columnCount: i === 0 || i === 4 ? 14 : 3,
+            columnCount: i === 0 || i === 4 ? 15 : 3,
             frozenRowCount: 1,
           },
         },

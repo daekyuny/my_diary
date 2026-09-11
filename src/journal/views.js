@@ -25,7 +25,6 @@ export function visibleGroups(
         e.title,
         e.body,
         ...e.tags,
-        ...(e.fields || []).flatMap((f) => [f.name, f.value]),
         ...e.events.flatMap((event) => [event.title, event.note]),
       ]
         .join('\n')
@@ -69,7 +68,7 @@ export function cards(groups, view, hasFilter = false) {
         .map((tag) => `<span>#${escape(tag)}</span>`)
         .join(
           '',
-        )}</span>${attachments}${group.heads.length > 1 ? '<span class="conflicted">다른 기기 수정 확인</span>' : !group.latest.sheetSaved ? '<span class="pending">기기 저장</span>' : ''}</span></span><span class="record-end">${icon('chevron')}</span></button><button class="record-delete" data-delete-entry="${escape(e.id)}" aria-label="${escape(e.title || '제목 없는 하루')} ${e.deletedAt ? '복원' : '삭제'}">${e.deletedAt ? '복원' : '삭제'}</button></div>`;
+        )}</span>${attachments}${group.latest.conflict || group.heads.length > 1 ? '<span class="conflicted">다른 기기 수정 확인</span>' : !group.latest.sheetSaved ? '<span class="pending">기기 저장</span>' : ''}</span></span><span class="record-end">${icon('chevron')}</span></button><button class="record-delete" data-delete-entry="${escape(e.id)}" aria-label="${escape(e.title || '제목 없는 하루')} ${e.deletedAt ? '복원' : '삭제'}">${e.deletedAt ? '복원' : '삭제'}</button></div>`;
     })
     .join('');
 }

@@ -55,41 +55,13 @@ test('responsive journal writes separate same-day entries, searches and switches
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-test('field settings add, rename and hide definitions while retaining historical values', async ({
-  page,
-}) => {
+test('custom fields are removed from settings and the editor', async ({ page }) => {
   await settings(page);
-  await expect(page.locator('#create-sheet')).toBeVisible();
-  await expect(page.locator('#sheet-help')).toContainText('Google 로그인');
-  await page.locator('#new-definition').click();
-  await page.locator('#definition-name').fill('장소');
-  await page.locator('#definition-form button[type=submit]').click();
-  await expect(page.locator('#small-dialog')).not.toBeVisible();
+  await expect(page.locator('#new-definition')).toHaveCount(0);
+  await expect(page.locator('#migration-status')).toBeVisible();
   await page.locator('#close-settings').click();
   await newEntry(page);
-  await page.locator('#entry-title').fill('항목이 있는 일기');
-  await page.locator('#add-field').click();
-  await page.locator('[data-add-field]').click();
-  await page.locator('[data-field-value]').fill('서울');
-  await saveClose(page);
-  await settings(page);
-  await page.locator('[data-edit-definition]').click();
-  await page.locator('#definition-name').fill('방문한 곳');
-  await page.locator('#definition-type').selectOption('number');
-  await page.locator('#definition-form button[type=submit]').click();
-  await expect(page.locator('#small-dialog')).not.toBeVisible();
-  await page.locator('[data-hide-definition]').click();
-  await expect(page.locator('.definition')).toContainText('숨김');
-  await page.locator('#close-settings').click();
-  await page.locator('.record').click();
-  await page.locator('#edit-entry').click();
-  await expect(page.locator('#fields label')).toHaveText('방문한 곳');
-  await expect(page.locator('[data-field-value]')).toHaveValue('서울');
-  await saveClose(page);
-  await page.reload();
-  await page.locator('.record').click();
-  await page.locator('#edit-entry').click();
-  await expect(page.locator('[data-field-value]')).toHaveValue('서울');
+  await expect(page.locator('#add-field')).toHaveCount(0);
 });
 
 test('pin and archive remain editable and body HTML never executes', async ({ page }) => {
@@ -208,26 +180,6 @@ test('manual save stays disabled until changed and closing unsaved edits asks fo
   await page.locator('#entry-title').fill('다른 제목');
   await page.locator('#entry-title').fill('저장한 제목');
   await expect(page.locator('#save')).toBeDisabled();
-});
-
-test('creating a field inside a diary attaches its input and preserves its value', async ({
-  page,
-}) => {
-  await newEntry(page);
-  await page.locator('#entry-title').fill('날씨 기록');
-  await page.locator('#add-field').click();
-  await page.locator('#create-field-here').click();
-  await page.locator('#definition-name').fill('날씨');
-  await page.locator('#definition-form button[type=submit]').click();
-  await expect(page.locator('#small-dialog')).not.toBeVisible();
-  await expect(page.locator('#fields label')).toHaveText('날씨');
-  await page.locator('[data-field-value]').fill('맑음');
-  await saveClose(page);
-  await page.reload();
-  await page.locator('.record').click();
-  await page.locator('#edit-entry').click();
-  await expect(page.locator('#fields label')).toHaveText('날씨');
-  await expect(page.locator('[data-field-value]')).toHaveValue('맑음');
 });
 
 test('existing diaries open for reading with an accessible edit action and no attachment filename', async ({

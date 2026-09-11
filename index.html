@@ -171,6 +171,7 @@
           <section id="entry-reading" class="read-only" aria-label="일기 읽기">
             <div class="reading-title-row">
               <h1 id="reading-title"></h1>
+              <button id="resolve-conflict" type="button" hidden>수정 충돌 확인</button>
               <button id="edit-entry" type="button" class="primary" aria-label="일기 수정">
                 수정
               </button>
@@ -209,14 +210,6 @@
             maxlength="120000"
           ></textarea>
           <div id="photos" class="photos"></div>
-          <div class="entry-section edit-only">
-            <div class="section-heading">
-              <h2>이 하루의 정보</h2>
-              <button id="add-field" type="button"><span data-icon="plus"></span>항목 추가</button>
-            </div>
-            <div id="fields" class="entry-fields"></div>
-            <p id="fields-empty" class="muted">장소, 날씨, 읽은 책… 필요한 정보만 더해보세요.</p>
-          </div>
           <div class="entry-section edit-only">
             <div class="section-heading">
               <h2><span data-icon="calendar"></span>이날의 일정</h2>
@@ -296,12 +289,12 @@
           </p>
         </section>
         <section>
-          <div class="section-heading">
-            <h3>추가 항목 관리</h3>
-            <button id="new-definition">＋ 항목 만들기</button>
-          </div>
-          <p class="muted">일기에 자주 기록할 항목을 정하세요. 숨긴 항목의 과거 값은 보존됩니다.</p>
-          <div id="definitions"></div>
+          <h3>기기 보관과 시트 정리</h3>
+          <p class="muted">
+            일기 날짜 기준 최근 100개 본문을 기기에 보관합니다. 과거 기록은 열 때 불러옵니다.
+            목록·날짜·제목은 전체 기록에서 찾을 수 있습니다.
+          </p>
+          <p id="migration-status" class="muted"></p>
         </section>
         <section>
           <h3>휴지통 관리</h3>
