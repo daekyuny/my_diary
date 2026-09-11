@@ -654,6 +654,15 @@ test('partially imported ZIP resumes the remaining local records after reload', 
     });
     await expect(page.locator('#connection')).toHaveText('클라우드 저장 대기');
     expect(state.tabs['일기'].rows.filter((r) => r[0]).length).toBe(21);
+    if (!(await page.locator('#settings-dialog').isVisible())) await settings(page);
+    await expect(page.locator('#cloud-error')).toContainText('Partial import interrupted');
+    await expect(page.locator('#cloud-error')).toBeVisible();
+    await expect(page.locator('#sync-progress')).toContainText('기기에 보관');
+    await expect(page.locator('#resume-sync')).toBeEnabled();
+    const writes = state.writeRequests;
+    await page.locator('#resume-sync').click();
+    await expect.poll(() => state.writeRequests).toBeGreaterThan(writes);
+    await expect(page.locator('#resume-sync')).toBeEnabled();
     state.failAfterTwenty = false;
     await page.reload();
     await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');

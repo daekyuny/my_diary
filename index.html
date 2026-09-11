@@ -277,9 +277,12 @@
           <button id="move-local" class="button" hidden>연결 전 기기 기록을 이 시트에 저장</button>
           <p class="muted">로그인 전에 작성한 기록은 위 버튼으로 연결된 시트에 저장합니다.</p>
           <button id="create-sheet" class="button">새 My Diary 시트 만들기</button>
+          <p id="cloud-error" class="muted" role="alert" hidden></p>
+          <p id="sync-progress" class="muted" role="status"></p>
+          <button id="resume-sync" class="button" hidden>남은 기록 저장 재개</button>
+          <button id="apply-update" class="button" hidden>새 버전 적용 · 새로고침</button>
           <div id="sheet-options">
             <button id="find-sheets" class="button">기존 시트 찾기·연결</button>
-            <p id="cloud-error" class="muted" role="alert" hidden></p>
             <label class="form-label"
               >사용할 My Diary 시트<select id="sheet-select"></select
             ></label>

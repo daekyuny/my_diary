@@ -33,6 +33,8 @@ let account = settings.account || null,
   syncWork = null,
   syncAgain = false,
   syncImages = [],
+  syncProgress = '',
+  updateReady = false,
   closeRequested = false,
   savedContent = null,
   ready = false;
@@ -129,6 +131,12 @@ function connection() {
             : account
               ? 'Google 재연결 필요'
               : '기기에 저장';
+  $('#sync-progress').textContent =
+    syncProgress || (pending ? `${pending}개 기록이 이 기기에서 저장을 기다립니다.` : '');
+  $('#resume-sync').hidden = !pending || !repository;
+  $('#resume-sync').disabled = busy || syncing || !navigator.onLine;
+  $('#apply-update').hidden = !updateReady;
+  $('#apply-update').disabled = busy || syncing || dirty;
   $('#connect-banner').hidden = Boolean(online && repository);
   $('#account-name').textContent = account?.displayName || '나만의 일기장';
   $('#account-caption').textContent = account?.emailAddress || 'Google Sheets에 연결하세요';
@@ -393,6 +401,8 @@ function syncCloud() {
           }
           await store.acknowledgeRevision(revision);
         }
+        syncProgress = `이번 묶음 ${batch.length}개를 Sheets에 저장하고 있습니다. 전체 저장 대기 ${pending.length - offset + batch.length}개`;
+        connection();
         await repository.saveMany(batch);
         for (const revision of batch) {
           delete revision.entry.removedImages;
@@ -406,14 +416,23 @@ function syncCloud() {
     if (!entry && !busy) await refresh();
     syncImages = [];
     await cleanLocalPhotos(entry?.images || []);
+    syncProgress = '';
+    $('#cloud-error').hidden = true;
     if (saved && !syncAgain) toast('Google Sheets에 저장했습니다.');
-  })().finally(() => {
-    syncWork = null;
-    syncing = false;
-    syncImages = [];
-    connection();
-    if (syncAgain) queueMicrotask(() => syncCloud().catch((error) => toast(error.message, true)));
-  });
+  })()
+    .catch((error) => {
+      syncProgress = '전송이 중단되었습니다. 남은 기록은 기기에 보관됩니다.';
+      $('#cloud-error').textContent = error.message;
+      $('#cloud-error').hidden = false;
+      throw error;
+    })
+    .finally(() => {
+      syncWork = null;
+      syncing = false;
+      syncImages = [];
+      connection();
+      if (syncAgain) queueMicrotask(() => syncCloud().catch((error) => toast(error.message, true)));
+    });
   return syncWork;
 }
 function saveAndClose() {
@@ -1201,6 +1220,8 @@ $('#import-input').onchange = () =>
       );
   });
 window.addEventListener('sheets-quota-wait', (event) => {
+  syncProgress = `Google 요청 한도로 ${Math.ceil(event.detail.delay / 1000)}초 후 자동 재시도합니다.`;
+  connection();
   toast(
     `Google 요청 한도로 ${Math.ceil(event.detail.delay / 1000)}초 후 자동으로 계속합니다. 남은 기록은 기기에 보관됩니다.`,
   );
@@ -1239,6 +1260,10 @@ $('#move-local').onclick = () =>
     await save();
     toast('연결 전 기록을 이 계정에 가져왔습니다.');
   });
+$('#resume-sync').onclick = () => resumeConnection().catch((error) => toast(error.message, true));
+$('#apply-update').onclick = () => {
+  if (!busy && !syncing && !dirty) location.reload();
+};
 async function resumeConnection() {
   if (account && settings.authServer && !google.connected()) {
     syncing = true;
@@ -1312,7 +1337,16 @@ async function start() {
   ready = true;
   locks(false);
   connection();
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) {
+    const wasControlled = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!wasControlled) return;
+      updateReady = true;
+      connection();
+      toast('새 버전이 준비되었습니다. 설정에서 새 버전을 적용해주세요.');
+    });
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});
+  }
   if (account)
     task(async () => {
       if (await google.restoreSession()) {
