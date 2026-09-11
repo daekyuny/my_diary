@@ -97,3 +97,26 @@ test('first offline grant without a scope field still returns a session', async 
   assert.equal(result.code, 200);
   assert.equal(result.body.access_token, 'access');
 });
+
+test('OAuth failures identify configuration errors without exposing provider details', async () => {
+  for (const reason of [
+    'invalid_client',
+    'unauthorized_client',
+    'redirect_uri_mismatch',
+    'invalid_grant',
+    'unexpected',
+  ]) {
+    const result = response();
+    await handleAuth(request('/auth/code'), result, {
+      secret: 'private-secret',
+      fetch: async () =>
+        Response.json(
+          { error: reason, error_description: 'private-provider-detail' },
+          { status: 400 },
+        ),
+    });
+    assert.equal(result.code, reason === 'invalid_grant' ? 401 : 502);
+    if (reason !== 'unexpected') assert.ok(result.body.error.includes(reason));
+    assert.ok(!JSON.stringify(result.body).includes('private-'));
+  }
+});

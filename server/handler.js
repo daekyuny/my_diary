@@ -44,10 +44,25 @@ export async function handleAuth(req, res, { secret, fetch = globalThis.fetch })
     });
     const tokens = await response.json();
     if (!response.ok) {
+      const errors = {
+        invalid_client:
+          'Google OAuth 클라이언트 ID와 서버의 클라이언트 보안 비밀번호가 일치하는지 확인해야 합니다. (invalid_client)',
+        unauthorized_client:
+          '이 Google OAuth 클라이언트에는 현재 인증 방식이 허용되지 않습니다. (unauthorized_client)',
+        redirect_uri_mismatch:
+          'Google OAuth 리디렉션 주소 설정을 확인해야 합니다. (redirect_uri_mismatch)',
+        invalid_grant:
+          'Google 인증 코드 또는 연결 권한이 만료되었거나 유효하지 않습니다. 다시 연결해주세요. (invalid_grant)',
+      };
+      const reason = Object.hasOwn(errors, tokens.error) ? tokens.error : 'unknown_oauth_error';
+      console.warn('diary_auth_exchange_failed', { action, reason, status: response.status });
       if (tokens.error === 'invalid_grant') res.set('Set-Cookie', cookie('', 0));
       res
         .status(tokens.error === 'invalid_grant' ? 401 : 502)
-        .json({ error: 'Google 연결을 갱신하지 못했습니다. 다시 연결해주세요.' });
+        .json({
+          error:
+            errors[reason] || 'Google 인증 서버가 연결을 거부했습니다. 잠시 후 다시 연결해주세요.',
+        });
       return;
     }
     const refresh = tokens.refresh_token || (action === 'token' ? session?.refresh : null);
