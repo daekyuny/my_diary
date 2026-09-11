@@ -57,12 +57,10 @@ export async function handleAuth(req, res, { secret, fetch = globalThis.fetch })
       const reason = Object.hasOwn(errors, tokens.error) ? tokens.error : 'unknown_oauth_error';
       console.warn('diary_auth_exchange_failed', { action, reason, status: response.status });
       if (tokens.error === 'invalid_grant') res.set('Set-Cookie', cookie('', 0));
-      res
-        .status(tokens.error === 'invalid_grant' ? 401 : 502)
-        .json({
-          error:
-            errors[reason] || 'Google 인증 서버가 연결을 거부했습니다. 잠시 후 다시 연결해주세요.',
-        });
+      res.status(tokens.error === 'invalid_grant' ? 401 : 502).json({
+        error:
+          errors[reason] || 'Google 인증 서버가 연결을 거부했습니다. 잠시 후 다시 연결해주세요.',
+      });
       return;
     }
     const refresh = tokens.refresh_token || (action === 'token' ? session?.refresh : null);
