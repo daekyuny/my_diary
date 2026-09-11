@@ -12,6 +12,7 @@
     <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/assets/icon-192.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="diary-build" content="__DIARY_BUILD__" />
     <link rel="stylesheet" href="/src/journal/styles.css" />
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     <script type="module" src="/vendor/journal-app.js"></script>
@@ -77,6 +78,10 @@
         </button>
       </header>
       <main id="main" tabindex="-1">
+        <div id="update-banner" role="status" hidden>
+          <span>새 버전이 준비되었습니다.</span>
+          <button class="button" data-apply-update>업데이트 적용</button>
+        </div>
         <div class="page-heading">
           <div>
             <div class="eyebrow" id="today"></div>
@@ -166,7 +171,10 @@
     </nav>
     <dialog id="editor-dialog" class="editor-dialog">
       <form id="editor-form">
-        <header class="editor-toolbar"><span id="save-state" role="status">새 기록</span></header>
+        <header class="editor-toolbar">
+          <span id="save-state" role="status">새 기록</span
+          ><button type="button" class="button" data-apply-update hidden>업데이트 적용</button>
+        </header>
         <div class="editor-paper">
           <section id="entry-reading" class="read-only" aria-label="일기 읽기">
             <div class="reading-title-row">
@@ -275,7 +283,10 @@
           <p id="cloud-error" class="muted" role="alert" hidden></p>
           <p id="sync-progress" class="muted" role="status"></p>
           <button id="resume-sync" class="button" hidden>남은 기록 저장 재개</button>
-          <button id="apply-update" class="button" hidden>새 버전 적용 · 새로고침</button>
+          <p class="muted">현재 버전: <span id="app-version"></span></p>
+          <p id="update-status" class="muted" role="status"></p>
+          <button id="check-update" class="button">업데이트 확인</button>
+          <button id="apply-update" class="button" data-apply-update hidden>업데이트 적용</button>
           <div id="sheet-options">
             <button id="find-sheets" class="button">기존 일기 찾기·이전</button>
             <label class="form-label">사용할 일기 저장소<select id="sheet-select"></select></label>

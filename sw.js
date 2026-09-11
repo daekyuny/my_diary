@@ -1,4 +1,8 @@
 const CACHE = 'my-diary-shell-v1';
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'DIARY_VERSION')
+    event.ports[0]?.postMessage({ version: CACHE.replace('my-diary-shell-', '') });
+});
 const SHELL = [
   '/',
   '/index.html',

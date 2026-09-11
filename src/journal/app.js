@@ -1,6 +1,7 @@
 import { recentIds } from './cache.js';
 import { revisionCache } from './revision-cache.js';
 import { openPhoto } from './photo-viewer.js';
+import { appUpdates } from './updates.js';
 import { icon, hydrateIcons } from './icons.js';
 import { escape, visibleGroups, cards, calendarHTML } from './views.js';
 import {
@@ -42,6 +43,7 @@ let account = settings.account || null,
   syncImages = [],
   syncProgress = '',
   updateReady = false,
+  updateApplying = false,
   closeRequested = false,
   savedContent = null,
   ready = false;
@@ -143,8 +145,11 @@ function connection() {
     syncProgress || (pending ? `${pending}개 기록이 이 기기에서 저장을 기다립니다.` : '');
   $('#resume-sync').hidden = !pending || !repository;
   $('#resume-sync').disabled = busy || syncing || !navigator.onLine;
-  $('#apply-update').hidden = !updateReady;
-  $('#apply-update').disabled = busy || syncing || dirty;
+  $('#update-banner').hidden = !updateReady;
+  document.querySelectorAll('[data-apply-update]').forEach((button) => {
+    button.hidden = !updateReady;
+    button.disabled = busy || syncing || updateApplying;
+  });
   $('#connect-banner').hidden = Boolean(online && repository && google.hasAppData());
   $('#account-name').textContent = account?.displayName || '나만의 일기장';
   $('#account-caption').textContent = account?.emailAddress || 'Google에 연결하세요';
@@ -1192,9 +1197,37 @@ $('#move-local').onclick = () =>
     toast('연결 전 기록을 이 계정에 가져왔습니다.');
   });
 $('#resume-sync').onclick = () => resumeConnection().catch((error) => toast(error.message, true));
-$('#apply-update').onclick = () => {
-  if (!busy && !syncing && !dirty) location.reload();
-};
+const updates = appUpdates({
+  onChange(state) {
+    updateReady = state.ready;
+    updateApplying = state.applying;
+    $('#app-version').textContent = state.version;
+    $('#update-status').textContent = state.message;
+    $('#check-update').disabled = state.checking || state.applying;
+    $('#check-update').textContent = state.checking ? '업데이트 확인 중…' : '업데이트 확인';
+    connection();
+  },
+  async preserve() {
+    if (busy || syncing) throw new Error('진행 중인 저장이 끝난 뒤 업데이트를 적용해주세요.');
+    busy = true;
+    locks(true);
+    connection();
+    try {
+      await save(false, true);
+    } catch (error) {
+      toast('작성 내용을 기기에 저장하지 못해 업데이트를 적용하지 않았습니다.', true);
+      throw error;
+    } finally {
+      busy = false;
+      locks(false);
+      connection();
+    }
+  },
+});
+$('#check-update').onclick = () => updates.check(true);
+document.querySelectorAll('[data-apply-update]').forEach((button) => {
+  button.onclick = () => updates.apply();
+});
 async function resumeConnection() {
   if (account && settings.authServer && !google.connected()) {
     syncing = true;
@@ -1265,16 +1298,7 @@ async function start() {
   ready = true;
   locks(false);
   connection();
-  if ('serviceWorker' in navigator) {
-    const wasControlled = Boolean(navigator.serviceWorker.controller);
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!wasControlled) return;
-      updateReady = true;
-      connection();
-      toast('새 버전이 준비되었습니다. 설정에서 새 버전을 적용해주세요.');
-    });
-    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).catch(() => {});
-  }
+  updates.start();
   if (account)
     task(async () => {
       if (await google.restoreSession()) {

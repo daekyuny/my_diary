@@ -2325,3 +2325,20 @@ dialog::backdrop {
     padding: 4px 8px;
   }
 }
+
+#update-banner:not([hidden]) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding: 12px 16px;
+  background: #edf3e6;
+  border: 1px solid #cbd8bf;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.editor-toolbar [data-apply-update] {
+  margin-left: auto;
+}

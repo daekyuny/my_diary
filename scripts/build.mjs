@@ -59,9 +59,15 @@ for (const file of [
 ])
   hash.update(await readFile(file));
 hash.update(await readFile('dist/config.json'));
+const version = hash.digest('hex').slice(0, 12);
+await writeFile('dist/version.json', JSON.stringify({ version }));
+await writeFile(
+  'dist/index.html',
+  (await readFile('dist/index.html', 'utf8')).replace('__DIARY_BUILD__', version),
+);
 const sw = (await readFile('sw.js', 'utf8')).replace(
   'my-diary-shell-v1',
-  `my-diary-shell-${hash.digest('hex').slice(0, 12)}`,
+  `my-diary-shell-${version}`,
 );
 await writeFile('dist/sw.js', sw);
 console.log('Built dist/ for Firebase Hosting or any static HTTPS host. No secrets are copied.');
