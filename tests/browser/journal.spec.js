@@ -238,13 +238,18 @@ test('existing diaries open for reading with an accessible edit action and no at
   await page
     .locator('#entry-body')
     .fill('기억하고 싶은 내용을 먼저 읽습니다.\n수정은 버튼을 눌러 시작합니다.');
+  const bytes = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 180;
+    canvas.getContext('2d').fillRect(0, 0, 320, 180);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+  });
   await page.locator('#photo-input').setInputFiles({
     name: 'private-name.png',
     mimeType: 'image/png',
-    buffer: Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII=',
-      'base64',
-    ),
+    buffer: Buffer.from(bytes),
   });
   await expect(page.locator('.photo-preview img')).toBeVisible();
   await saveClose(page);
