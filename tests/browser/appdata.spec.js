@@ -116,7 +116,7 @@ test('private storage uploads photos, releases original cache and exports their 
   const data = state();
   const context = await browser.newContext(device(testInfo));
   const bytes = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII=',
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
     'base64',
   );
   try {

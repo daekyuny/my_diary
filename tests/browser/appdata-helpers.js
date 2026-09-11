@@ -48,10 +48,11 @@ export async function mock(context, state) {
       });
     }
     if (url.pathname === '/upload/drive/v3/files') {
+      // Consume every attempt, including failures, to keep WebKit's Blob capture aligned.
+      const captured = await request.frame().evaluate(() => window.diaryUploadBodies.shift());
       if (state.failWrites)
         return route.fulfill({ status: 503, json: { error: { message: 'retry upload' } } });
       const boundary = request.headers()['content-type'].split('boundary=')[1];
-      const captured = await request.frame().evaluate(() => window.diaryUploadBodies.shift());
       const parts = (request.postDataBuffer() || Buffer.from(captured))
         .toString('binary')
         .split(`--${boundary}`);
