@@ -24,6 +24,10 @@ const paths = {
   menu: 'M4 6h16M4 12h16M4 18h16',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
   logout: 'M9 3H3v18h6M9 12h12m-5-5 5 5-5 5',
+  fullscreen: 'M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5',
+  window: 'M3 3h18v18H3ZM3 8h18',
+  zoomIn: 'M10 6v8M6 10h8M16 16l5 5M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0',
+  zoomOut: 'M6 10h8M16 16l5 5M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0',
 };
 export const icon = (name) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] ? `<path d="${paths[name]}"/>` : ''}</svg>`;

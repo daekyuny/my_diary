@@ -1,5 +1,6 @@
 import { recentIds } from './cache.js';
 import { revisionCache } from './revision-cache.js';
+import { openPhoto } from './photo-viewer.js';
 import { icon, hydrateIcons } from './icons.js';
 import { escape, visibleGroups, cards, calendarHTML } from './views.js';
 import {
@@ -1048,14 +1049,7 @@ $('#photos').onclick = (e) => {
   const open = e.target.closest('[data-open-photo]');
   if (open) {
     const image = entry.images.find((item) => item.id === open.dataset.openPhoto);
-    small('원본 사진', '<p>원본을 불러오는 중…</p>');
-    task(async () => {
-      const url = URL.createObjectURL(await assetBlob(image));
-      urls.push(url);
-      if ($('#small-dialog').open)
-        $('#small-body').innerHTML =
-          `<img class="original-photo" src="${url}" alt="첨부 사진 원본"/><p><a href="${url}" download="${escape(image.name)}">원본 다운로드</a></p>`;
-    });
+    openPhoto(image, () => assetBlob(image));
     return;
   }
   const b = e.target.closest('[data-remove-photo]');
