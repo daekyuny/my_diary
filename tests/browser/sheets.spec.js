@@ -3,6 +3,14 @@ const scope = 'https://www.googleapis.com/auth/drive.file';
 // Route mocked API requests directly; service worker fetches bypass WebKit interception.
 async function mock(context, state) {
   await context.addInitScript((scope) => {
+    // WebKit interception omits Blob bodies; inspect the real serialized payload before fetch.
+    window.diaryTestUploadBodies = [];
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input, options) => {
+      if (String(input).includes('/upload/drive/v3/files') && options?.body instanceof Blob)
+        window.diaryTestUploadBodies.push(await options.body.text());
+      return originalFetch(input, options);
+    };
     window.google = {
       accounts: {
         oauth2: {
@@ -36,7 +44,10 @@ async function mock(context, state) {
         },
       });
     if (url.pathname.startsWith('/upload/drive/v3/files')) {
-      const metadata = JSON.parse(request.postData().split('\r\n\r\n')[1].split('\r\n--')[0]);
+      const captured = await request.frame().evaluate(() => window.diaryTestUploadBodies.shift());
+      const metadata = JSON.parse(
+        (request.postData() ?? captured).split('\r\n\r\n')[1].split('\r\n--')[0],
+      );
       state.uploads ||= [];
       const id = `asset-${state.uploads.length + 1}`;
       state.uploads.push({ id, ...metadata });
