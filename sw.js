@@ -50,7 +50,6 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   // Only application assets are cached, never OAuth tokens or third-party API responses.
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
-  if (url.pathname === '/src/keep-probe.html') return;
   if (event.request.mode === 'navigate') {
     // Serve HTML and modules from the same version until the next worker activates.
     event.respondWith(

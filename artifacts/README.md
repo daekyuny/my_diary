@@ -1,4 +1,14 @@
-# 첫 버전 검증 기록
+# 화면 검증 자료
+
+## 현재 Sheets 앱 · 2026-09-11
+
+- [목록](journal-list-chromium.png) · [모바일 목록](journal-list-mobile-chromium.png)
+- [읽기](journal-reading-chromium.png) · [모바일 읽기](journal-reading-mobile-chromium.png)
+- [편집](journal-editor-chromium.png) · [모바일 편집](journal-editor-mobile-chromium.png)
+
+추가항목 제거·최근 100개 캐시·변경분 동기화·충돌 보존을 포함한 PC·모바일 Chromium 검사와 Safari 엔진 검사를 CI에서 통과했습니다. 아래 내용은 이전 Drive 버전 당시의 기록이며, 그때의 미완료 항목이 현재 상태를 뜻하지는 않습니다.
+
+## 첫 버전 검증 기록
 
 검증일: 2026-09-09. 화면 캡처의 내용은 테스트가 생성한 예시이며 실제 사용자 일기가 아닙니다.
 
