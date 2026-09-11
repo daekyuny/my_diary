@@ -1,3 +1,4 @@
+import { zipSync, strToU8 } from 'fflate';
 import { test, expect } from '@playwright/test';
 const scope = 'https://www.googleapis.com/auth/drive.file';
 // Route mocked API requests directly; service worker fetches bypass WebKit interception.
@@ -120,6 +121,11 @@ async function mock(context, state) {
       });
     }
     if (url.pathname.endsWith(':batchUpdate')) {
+      state.writeRequests = (state.writeRequests || 0) + 1;
+      if (state.quotaOnce) {
+        state.quotaOnce = false;
+        return send({ error: { message: 'Write quota exceeded' } }, 429);
+      }
       if (
         state.failInitialize &&
         body.requests.some((r) => r.addSheet && r.addSheet.properties.title !== '__MyDiaryLock')
@@ -135,6 +141,8 @@ async function mock(context, state) {
         state.waitingForWrite = true;
         await new Promise((resolve) => (state.releaseWrite = resolve));
       }
+      if (isSave && state.failAfterTwenty && (state.tabs['일기']?.rows.length || 0) >= 21)
+        return send({ error: { message: 'Partial import interrupted' } }, 503);
       if (isSave && state.failWrites) return send({ error: { message: '잠시 저장 실패' } }, 503);
       if (
         body.requests.some(
@@ -571,6 +579,90 @@ test('save returns to the list before upload and a newer edit survives the earli
   } finally {
     state.holdWrites = false;
     state.releaseWrite?.();
+    await context.close();
+  }
+});
+
+test('large ZIP saves in batches and resumes after a quota response without duplicates', async ({
+  browser,
+}) => {
+  const state = { exists: false, tabs: {} };
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await setup(page);
+    const files = Object.fromEntries(
+      Array.from({ length: 61 }, (_, i) => [
+        `Keep/${i}.json`,
+        strToU8(
+          JSON.stringify({
+            title: `가져온 일기 ${i}`,
+            textContent: `본문 ${i}`,
+            labels: [{ name: 'My Diary' }],
+            createdTimestampUsec: 1700000000000000 + i * 1000000,
+          }),
+        ),
+      ]),
+    );
+    const archive = {
+      name: 'keep.zip',
+      mimeType: 'application/zip',
+      buffer: Buffer.from(zipSync(files)),
+    };
+    const before = state.writeRequests;
+    state.quotaOnce = true;
+    await page.locator('#import-input').setInputFiles(archive);
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨', { timeout: 20000 });
+    expect(state.tabs['일기'].rows.filter((r) => r[0]).length).toBe(62);
+    expect(state.writeRequests - before).toBeLessThanOrEqual(18);
+    await page.locator('#import-input').setInputFiles(archive);
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    expect(state.tabs['일기'].rows.filter((r) => r[0]).length).toBe(62);
+  } finally {
+    await context.close();
+  }
+});
+
+test('partially imported ZIP resumes the remaining local records after reload', async ({
+  browser,
+}) => {
+  const state = { exists: false, tabs: {} };
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await setup(page);
+    state.failAfterTwenty = true;
+    const files = Object.fromEntries(
+      Array.from({ length: 25 }, (_, i) => [
+        `Keep/${i}.json`,
+        strToU8(
+          JSON.stringify({
+            title: `재개 일기 ${i}`,
+            textContent: `본문 ${i}`,
+            labels: [{ name: 'My Diary' }],
+            createdTimestampUsec: 1700000000000000 + i * 1000000,
+          }),
+        ),
+      ]),
+    );
+    await page
+      .locator('#import-input')
+      .setInputFiles({
+        name: 'keep.zip',
+        mimeType: 'application/zip',
+        buffer: Buffer.from(zipSync(files)),
+      });
+    await expect(page.locator('#connection')).toHaveText('클라우드 저장 대기');
+    expect(state.tabs['일기'].rows.filter((r) => r[0]).length).toBe(21);
+    state.failAfterTwenty = false;
+    await page.reload();
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    const rows = state.tabs['일기'].rows.slice(1).filter((r) => r[0]);
+    expect(rows.length).toBe(25);
+    expect(new Set(rows.map((r) => r[0])).size).toBe(25);
+  } finally {
     await context.close();
   }
 });

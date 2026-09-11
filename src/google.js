@@ -1,3 +1,8 @@
+import { createSheetsQuota } from './sheets-quota.js';
+const sheetsQuota = createSheetsQuota({
+  notify: (delay) =>
+    globalThis.dispatchEvent?.(new CustomEvent('sheets-quota-wait', { detail: { delay } })),
+});
 import { parseRevision, revisionFile, imageFileName, calendarEvent } from './model.js';
 
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
@@ -135,7 +140,8 @@ export function authorize(calendar = false) {
   });
 }
 
-export async function request(path, options = {}, retried = false) {
+export async function request(path, options = {}, retried = false, quotaAttempt = 0) {
+  if (path.startsWith('sheets/')) await sheetsQuota.reserve(options.method || 'GET');
   if (!connected()) await restoreSession();
   if (!connected())
     throw new Error('Google 연결이 필요합니다. 저장한 기록은 기기에 남아 있습니다.');
@@ -163,6 +169,8 @@ export async function request(path, options = {}, retried = false) {
     clearTimeout(timer);
   }
 
+  if (path.startsWith('sheets/') && (await sheetsQuota.retry(response, quotaAttempt)))
+    return request(path, options, retried, quotaAttempt + 1);
   if (!response.ok) {
     if (response.status === 401 && authServer && !retried) {
       token = '';

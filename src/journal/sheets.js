@@ -376,6 +376,47 @@ export class SheetsRepository {
     }
     await this.write(updates);
   }
+  async saveMany(revisions) {
+    if (revisions.length === 1) return this.save(revisions[0]);
+    if (new Set(revisions.map((r) => r.entry.id)).size !== revisions.length) {
+      for (const revision of revisions) await this.save(revision);
+      return;
+    }
+    return withSheetLock(this.id, async (renew) => {
+      this.renewLease = renew;
+      try {
+        if (!this.tabs) await this.prepare();
+        await this.list();
+        const existing = new Set(this.rawIndex.map((r) => r.entry.id));
+        const fresh = [];
+        for (const revision of revisions) {
+          if (existing.has(revision.entry.id) || revision.remoteKnown) await this._save(revision);
+          else {
+            fresh.push(revision);
+            existing.add(revision.entry.id);
+          }
+        }
+        const requests = fresh.flatMap((revision) =>
+          encodeRevision(revision).flatMap((rows, tab) =>
+            rows.length
+              ? [
+                  {
+                    appendCells: {
+                      sheetId: this.tabs[tab === 0 && revision.entry.deletedAt ? 4 : tab],
+                      rows: rows.map(cells),
+                      fields: 'userEnteredValue',
+                    },
+                  },
+                ]
+              : [],
+          ),
+        );
+        await this.write(requests);
+      } finally {
+        this.renewLease = null;
+      }
+    });
+  }
   async save(revision) {
     return withSheetLock(this.id, async (renew) => {
       this.renewLease = renew;

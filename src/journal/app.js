@@ -365,28 +365,41 @@ function syncCloud() {
       syncAgain = false;
       const pending = (await store.all('revisions')).filter((r) => !r.sheetSaved && !r.summary);
       syncImages = pending.flatMap((r) => r.entry.images);
-      for (const revision of pending) {
-        for (const image of revision.entry.images) await uploadPhoto(image);
-        for (const removed of revision.entry.removedImages || []) {
-          const original = await store.get('assets', removed.id);
-          removed.driveId ||= original?.driveId;
-          const thumb = await store.get(
-            'assets',
-            removed.thumbnail?.id || `${removed.id}-thumbnail`,
-          );
-          if (thumb?.driveId)
-            removed.thumbnail = {
-              id: thumb.id,
-              name: thumb.name,
-              type: thumb.type,
-              driveId: thumb.driveId,
-            };
+      for (let offset = 0; offset < pending.length;) {
+        const batch = [];
+        let bytes = 0;
+        while (offset < pending.length && batch.length < 20) {
+          const size = new TextEncoder().encode(JSON.stringify(pending[offset])).length;
+          if (batch.length && bytes + size > 500000) break;
+          bytes += size;
+          batch.push(pending[offset++]);
         }
-        await store.acknowledgeRevision(revision);
-        await repository.save(revision);
-        delete revision.entry.removedImages;
-        await store.acknowledgeRevision({ ...revision, sheetSaved: true, remoteKnown: true });
-        saved = true;
+        for (const revision of batch) {
+          for (const image of revision.entry.images) await uploadPhoto(image);
+          for (const removed of revision.entry.removedImages || []) {
+            const original = await store.get('assets', removed.id);
+            removed.driveId ||= original?.driveId;
+            const thumb = await store.get(
+              'assets',
+              removed.thumbnail?.id || `${removed.id}-thumbnail`,
+            );
+            if (thumb?.driveId)
+              removed.thumbnail = {
+                id: thumb.id,
+                name: thumb.name,
+                type: thumb.type,
+                driveId: thumb.driveId,
+              };
+          }
+          await store.acknowledgeRevision(revision);
+        }
+        await repository.saveMany(batch);
+        for (const revision of batch) {
+          delete revision.entry.removedImages;
+          await store.acknowledgeRevision({ ...revision, sheetSaved: true, remoteKnown: true });
+          saved = true;
+        }
+        await load();
       }
       await load();
     } while (syncAgain || (await store.all('revisions')).some((r) => !r.sheetSaved && !r.summary));
@@ -1180,8 +1193,18 @@ $('#import-input').onchange = () =>
     await load();
     $('#import-input').value = '';
     toast(`${fresh.length}개 기록을 가져왔습니다. 클라우드 저장을 진행합니다.`);
-    await save();
+    return true;
+  }).then((imported) => {
+    if (imported)
+      resumeConnection().catch((error) =>
+        toast(`남은 기록은 기기에 저장되어 있습니다. ${error.message}`, true),
+      );
   });
+window.addEventListener('sheets-quota-wait', (event) => {
+  toast(
+    `Google 요청 한도로 ${Math.ceil(event.detail.delay / 1000)}초 후 자동으로 계속합니다. 남은 기록은 기기에 보관됩니다.`,
+  );
+});
 $('#export').onclick = () =>
   task(async () => {
     await save();
