@@ -1217,9 +1217,17 @@ $('#move-local').onclick = () =>
     toast('연결 전 기록을 이 계정에 가져왔습니다.');
   });
 async function resumeConnection() {
-  if (account && settings.authServer && !google.connected()) await google.restoreSession();
+  if (account && settings.authServer && !google.connected()) {
+    syncing = true;
+    connection();
+    try {
+      await google.restoreSession();
+    } finally {
+      if (!syncWork) syncing = false;
+      connection();
+    }
+  }
   await save();
-  if (!entry && !busy) await refresh();
 }
 function backgroundSync() {
   if (
