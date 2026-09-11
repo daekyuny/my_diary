@@ -14,11 +14,10 @@ const settings = async (page) => {
     .click();
 };
 const saveClose = async (page) => {
-  if (await page.locator('#save').isEnabled()) {
+  if ((await page.locator('#save').isVisible()) && (await page.locator('#save').isEnabled())) {
     await page.locator('#save').click();
-    await expect(page.locator('#save')).toBeDisabled();
-  }
-  await page.locator('#close-editor').click();
+  } else await page.locator('#close-editor').click();
+  await expect(page.locator('#editor-dialog')).not.toBeVisible();
 };
 const newEntry = async (page) => {
   await page.locator('#quick-entry').click();
@@ -83,11 +82,13 @@ test('field settings add, rename and hide definitions while retaining historical
   await expect(page.locator('.definition')).toContainText('숨김');
   await page.locator('#close-settings').click();
   await page.locator('.record').click();
+  await page.locator('#edit-entry').click();
   await expect(page.locator('#fields label')).toHaveText('방문한 곳');
   await expect(page.locator('[data-field-value]')).toHaveValue('서울');
   await saveClose(page);
   await page.reload();
   await page.locator('.record').click();
+  await page.locator('#edit-entry').click();
   await expect(page.locator('[data-field-value]')).toHaveValue('서울');
 });
 
@@ -98,12 +99,14 @@ test('pin and archive remain editable and body HTML never executes', async ({ pa
   await page.locator('#pin-entry').click();
   await saveClose(page);
   await page.locator('.record').click();
+  await page.locator('#edit-entry').click();
   await expect(page.locator('#pin-entry')).toHaveAttribute('aria-pressed', 'true');
   await page.locator('#archive-entry').click();
   await saveClose(page);
   await expect(page.locator('.record')).toHaveCount(0);
   await page.locator('[data-collection=archive]:visible').click();
   await page.locator('.record').click();
+  await page.locator('#edit-entry').click();
   await page.locator('#archive-entry').click();
   await saveClose(page);
   await expect(page.locator('.record')).toHaveCount(0);
@@ -167,6 +170,7 @@ test('journal design captures populated list, cards, calendar and editor', async
     fullPage: true,
   });
   await page.locator('.record').first().click();
+  await page.locator('#edit-entry').click();
   await expect(page.locator('#editor-dialog')).toBeVisible();
   await page.screenshot({
     path: `artifacts/journal-editor-${info.project.name}.png`,
@@ -182,7 +186,10 @@ test('manual save stays disabled until changed and closing unsaved edits asks fo
   await expect(page.locator('#save')).toBeDisabled();
   await page.locator('#entry-title').fill('저장한 제목');
   await page.locator('#save').click();
-  await expect(page.locator('#editor-dialog')).toBeVisible();
+  await expect(page.locator('#editor-dialog')).not.toBeVisible();
+  await page.locator('.record').click();
+  await expect(page.locator('#entry-reading')).toBeVisible();
+  await page.locator('#edit-entry').click();
   await expect(page.locator('#save')).toBeDisabled();
   await page.locator('#entry-body').fill('저장하지 않을 변경');
   await page.waitForTimeout(1600);
@@ -196,6 +203,7 @@ test('manual save stays disabled until changed and closing unsaved edits asks fo
   page.once('dialog', (dialog) => dialog.accept());
   await page.locator('#close-editor').click();
   await page.locator('.record').click();
+  await page.locator('#edit-entry').click();
   await expect(page.locator('#entry-body')).toHaveValue('');
   await page.locator('#entry-title').fill('다른 제목');
   await page.locator('#entry-title').fill('저장한 제목');
@@ -217,6 +225,49 @@ test('creating a field inside a diary attaches its input and preserves its value
   await saveClose(page);
   await page.reload();
   await page.locator('.record').click();
+  await page.locator('#edit-entry').click();
   await expect(page.locator('#fields label')).toHaveText('날씨');
   await expect(page.locator('[data-field-value]')).toHaveValue('맑음');
+});
+
+test('existing diaries open for reading with an accessible edit action and no attachment filename', async ({
+  page,
+}, info) => {
+  await newEntry(page);
+  await page.locator('#entry-title').fill('차분히 읽는 하루');
+  await page
+    .locator('#entry-body')
+    .fill('기억하고 싶은 내용을 먼저 읽습니다.\n수정은 버튼을 눌러 시작합니다.');
+  await page.locator('#photo-input').setInputFiles({
+    name: 'private-name.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII=',
+      'base64',
+    ),
+  });
+  await expect(page.locator('.photo-preview img')).toBeVisible();
+  await saveClose(page);
+  await page.locator('.record').click();
+  await expect(page.locator('#reading-title')).toHaveText('차분히 읽는 하루');
+  await expect(page.locator('#entry-body')).not.toBeVisible();
+  await expect(page.locator('[data-remove-photo]')).toHaveCount(0);
+  await expect(page.locator('#photos figcaption')).toHaveCount(0);
+  await expect(page.locator('#edit-entry')).toBeFocused();
+  await page.screenshot({ path: `artifacts/journal-reading-${info.project.name}.png` });
+  await page.locator('#edit-entry').click();
+  await expect(page.locator('#entry-title')).toBeFocused();
+  await expect(page.locator('[data-remove-photo]')).toBeVisible();
+  const button = await page.locator('[data-remove-photo]').boundingBox();
+  const image = await page.locator('.photo-preview').boundingBox();
+  expect(button.y).toBeGreaterThanOrEqual(image.y + image.height);
+  expect(button.height).toBe(36);
+  await expect(page.locator('#save')).toBeDisabled();
+  await page.locator('#add-event').click();
+  await page.locator('[data-event-title]').fill('모바일에서도 읽기 쉬운 일정 제목');
+  const titleBox = await page.locator('[data-event-title]').boundingBox();
+  const removeBox = await page.locator('[data-remove-event]').boundingBox();
+  expect(titleBox.height).toBe(44);
+  expect(removeBox.x).toBeGreaterThanOrEqual(titleBox.x + titleBox.width);
+  expect(removeBox.height).toBe(40);
 });

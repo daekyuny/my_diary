@@ -2065,3 +2065,99 @@ dialog::backdrop {
   object-fit: contain;
   margin: auto;
 }
+
+#editor-form:not(.reading) .read-only,
+#editor-form.reading .edit-only {
+  display: none;
+}
+.reading-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.reading-title-row h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 26px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+#edit-entry {
+  flex: none;
+  min-height: 44px;
+  padding: 8px 18px;
+}
+#reading-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.9;
+  margin: 24px 0;
+}
+#reading-details p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.reading-event {
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+.reading-event h2 {
+  font-size: 16px;
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+.photos figure {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 135px;
+}
+.photos .photo-preview {
+  order: -1;
+  padding: 0;
+  min-height: 0;
+  line-height: 0;
+  border-radius: 8px;
+}
+.photos .remove-photo {
+  position: static;
+  margin: 0;
+  padding: 6px 10px;
+  min-height: 36px;
+  height: 36px;
+  line-height: 24px;
+  box-sizing: border-box;
+  font-size: 12px;
+  border-radius: 6px;
+}
+.event-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.event-top input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  height: 44px;
+  padding: 8px 10px;
+  line-height: 26px;
+  box-sizing: border-box;
+}
+.event-top button {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  padding: 8px;
+  display: grid;
+  place-items: center;
+}
+@media (max-width: 600px) {
+  .reading-title-row h1 {
+    font-size: 23px;
+  }
+}

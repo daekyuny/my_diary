@@ -168,7 +168,18 @@
       <form id="editor-form">
         <header class="editor-toolbar"><span id="save-state" role="status">새 기록</span></header>
         <div class="editor-paper">
-          <div class="editor-date-row">
+          <section id="entry-reading" class="read-only" aria-label="일기 읽기">
+            <div class="reading-title-row">
+              <h1 id="reading-title"></h1>
+              <button id="edit-entry" type="button" class="primary" aria-label="일기 수정">
+                수정
+              </button>
+            </div>
+            <p id="reading-date" class="muted"></p>
+            <div id="reading-body"></div>
+            <div id="reading-details"></div>
+          </section>
+          <div class="editor-date-row edit-only">
             <label class="editor-date"
               ><span data-icon="calendar"></span
               ><input id="entry-date" type="date" aria-label="일기 날짜" required /></label
@@ -183,21 +194,22 @@
               <span data-icon="pin"></span>
             </button>
           </div>
-          <label class="sr-only" for="entry-title">제목</label
+          <label class="sr-only edit-only" for="entry-title">제목</label
           ><input
             id="entry-title"
-            class="entry-title"
+            class="entry-title edit-only"
             placeholder="제목을 남겨보세요"
             maxlength="200"
           />
-          <label class="sr-only" for="entry-body">일기 내용</label
+          <label class="sr-only edit-only" for="entry-body">일기 내용</label
           ><textarea
             id="entry-body"
+            class="edit-only"
             placeholder="기억하고 싶은 순간, 떠오르는 생각…&#10;완벽한 문장이 아니어도 괜찮아요."
             maxlength="120000"
           ></textarea>
           <div id="photos" class="photos"></div>
-          <div class="entry-section">
+          <div class="entry-section edit-only">
             <div class="section-heading">
               <h2>이 하루의 정보</h2>
               <button id="add-field" type="button"><span data-icon="plus"></span>항목 추가</button>
@@ -205,7 +217,7 @@
             <div id="fields" class="entry-fields"></div>
             <p id="fields-empty" class="muted">장소, 날씨, 읽은 책… 필요한 정보만 더해보세요.</p>
           </div>
-          <div class="entry-section">
+          <div class="entry-section edit-only">
             <div class="section-heading">
               <h2><span data-icon="calendar"></span>이날의 일정</h2>
               <button id="get-events" type="button">
@@ -215,7 +227,7 @@
             <div id="events" class="events"></div>
             <button id="add-event" type="button" class="subtle-add">＋ 직접 일정 남기기</button>
           </div>
-          <label class="tag-input"
+          <label class="tag-input edit-only"
             ><span data-icon="tag"></span
             ><input
               id="entry-tags"
@@ -225,11 +237,12 @@
           ><datalist id="tag-suggestions"></datalist>
         </div>
         <footer class="editor-footer">
-          <button id="add-photo" type="button"><span data-icon="photo"></span>사진</button
-          ><button id="archive-entry" type="button">
+          <button id="add-photo" type="button" class="edit-only">
+            <span data-icon="photo"></span>사진</button
+          ><button id="archive-entry" type="button" class="edit-only">
             <span data-icon="archive"></span><span>삭제하기</span></button
           ><span id="word-count">0자</span><button id="close-editor" type="button">닫기</button
-          ><button id="save" class="primary" type="submit" disabled>저장</button>
+          ><button id="save" class="primary edit-only" type="submit" disabled>저장</button>
         </footer>
       </form>
     </dialog>

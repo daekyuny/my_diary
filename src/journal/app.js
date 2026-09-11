@@ -26,6 +26,13 @@ let account = settings.account || null,
   activeRevision = '',
   dirty = false,
   busy = false,
+  editing = true,
+  desiredFocus = null,
+  loadGeneration = 0,
+  syncing = false,
+  syncWork = null,
+  syncAgain = false,
+  syncImages = [],
   closeRequested = false,
   savedContent = null,
   ready = false;
@@ -86,6 +93,7 @@ async function task(fn) {
   if (busy || !ready) return;
   busy = true;
   locks(true);
+  connection();
   try {
     return await fn();
   } catch (error) {
@@ -96,6 +104,8 @@ async function task(fn) {
     busy = false;
     locks(false);
     connection();
+    if (desiredFocus && $('#editor-dialog').open) desiredFocus.focus({ preventScroll: true });
+    desiredFocus = null;
     if (closeRequested) {
       closeRequested = false;
       task(closeEditor);
@@ -105,19 +115,20 @@ async function task(fn) {
 function connection() {
   const online = google.connected() && navigator.onLine;
   const pending = groups.filter((group) => !group.latest.sheetSaved).length;
-  $('#connection').textContent = busy
-    ? '저장·연결 중…'
-    : !navigator.onLine
-      ? '오프라인 · 기기 저장'
-      : online && repository
-        ? pending
-          ? '클라우드 저장 대기'
-          : 'Sheets 연결됨'
-        : online
-          ? '시트 연결 필요 · 기기 저장'
-          : account
-            ? 'Google 재연결 필요'
-            : '기기에 저장';
+  $('#connection').textContent =
+    busy || syncing
+      ? '저장·연결 중…'
+      : !navigator.onLine
+        ? '오프라인 · 기기 저장'
+        : online && repository
+          ? pending
+            ? '클라우드 저장 대기'
+            : 'Sheets 연결됨'
+          : online
+            ? '시트 연결 필요 · 기기 저장'
+            : account
+              ? 'Google 재연결 필요'
+              : '기기에 저장';
   $('#connect-banner').hidden = Boolean(online && repository);
   $('#account-name').textContent = account?.displayName || '나만의 일기장';
   $('#account-caption').textContent = account?.emailAddress || 'Google Sheets에 연결하세요';
@@ -130,8 +141,20 @@ function connection() {
     .querySelectorAll('.record, [data-delete-entry]')
     .forEach((button) => (button.disabled = busy));
   $('#disconnect').hidden = !account;
+  for (const id of [
+    'disconnect',
+    'select-sheet',
+    'find-sheets',
+    'create-sheet',
+    'repair-sheet',
+    'import',
+    'export',
+    'move-local',
+    'purge-trash',
+  ])
+    $('#' + id).disabled = busy || syncing;
   for (const id of ['connect', 'banner-connect', 'settings-connect']) {
-    $('#' + id).disabled = busy || online;
+    $('#' + id).disabled = busy || syncing || online;
   }
   $('#sheet-options').hidden = false;
   $('#sheet-select').parentElement.hidden = !$('#sheet-select').options.length;
@@ -147,7 +170,8 @@ function connection() {
         ? '기존 시트를 선택해 연결해주세요.'
         : '아직 시트가 연결되지 않았습니다. 새 My Diary 시트 만들기를 눌러주세요.';
   if (repository) $('#open-sheet').href = repository.url;
-  $('#trash-days').value = String(repository?.retentionDays ?? settings.trashDays ?? 30);
+  if (!$('#settings-dialog').open)
+    $('#trash-days').value = String(repository?.retentionDays ?? settings.trashDays ?? 30);
   $('#move-local').hidden = !account || !repository;
   $('#sheet-details').textContent = repository
     ? `시트 ID: ${repository.id} · 시트에서 확인한 일기 ${repository.index.filter((r) => !r.entry.deletedAt).length}개 · 휴지통 ${repository.index.filter((r) => r.entry.deletedAt).length}개 · 이 기기 저장 대기 ${pending}개${online ? '' : ' · 재연결 후 최신 개수 확인'}`
@@ -243,6 +267,7 @@ function render() {
   connection();
 }
 async function load() {
+  const generation = ++loadGeneration;
   const revisions = await store.all('revisions');
   for (const r of revisions) {
     if (r.entry.archived && !r.entry.deletedAt) {
@@ -250,10 +275,11 @@ async function load() {
       await store.put('revisions', r);
     }
   }
+  if (generation !== loadGeneration) return;
   groups = entryGroups(revisions);
   const keep = new Set(groups.map((g) => g.latest.id));
   for (const r of revisions) if (!keep.has(r.id)) await store.remove('revisions', r.id);
-  render();
+  if (generation === loadGeneration) render();
 }
 async function hydrate(revision) {
   if (!revision.summary) return revision;
@@ -280,7 +306,7 @@ async function refresh() {
       (r) => r.entry.id === revision.entry.id && !r.sheetSaved,
     );
     if (pending && pending.id !== revision.id) continue;
-    await store.replaceCurrent(
+    await store.mergeRemoteRevision(
       existing && !existing.summary
         ? { ...existing, sheetSaved: true, row: revision.row, tab: revision.tab }
         : revision,
@@ -288,7 +314,7 @@ async function refresh() {
   }
   await load();
   lastRefresh = Date.now();
-  if (entry && !dirty) {
+  if (entry && !dirty && !editing) {
     const group = groups.find((g) => g.latest.entry.id === entry.id);
     if (group && group.heads.length === 1 && group.latest.id !== activeRevision) {
       const r = await hydrate(group.latest);
@@ -322,24 +348,72 @@ async function save(sync = true, commit = false) {
     savedContent = JSON.stringify(entry);
     await load();
   }
-  if (sync && repository && google.connected() && navigator.onLine) {
-    for (const revision of (await store.all('revisions')).filter(
-      (r) => !r.sheetSaved && !r.summary,
-    )) {
-      for (const image of revision.entry.images) await uploadPhoto(image);
-      await repository.save(revision);
-      delete revision.entry.removedImages;
-      await store.replaceCurrent({ ...revision, sheetSaved: true, remoteKnown: true });
-      if (!dirty && entry?.id === revision.entry.id) {
-        entry.images = structuredClone(revision.entry.images);
-        delete entry.removedImages;
-        savedContent = JSON.stringify(entry);
-      }
-    }
-    await refresh();
-    await cleanLocalPhotos(entry?.images || []);
-  }
+  if (sync) await syncCloud();
   connection();
+}
+function syncCloud() {
+  if (!repository || !google.connected() || !navigator.onLine) return Promise.resolve();
+  if (syncWork) {
+    syncAgain = true;
+    return syncWork;
+  }
+  syncing = true;
+  connection();
+  syncWork = (async () => {
+    let saved = false;
+    do {
+      syncAgain = false;
+      const pending = (await store.all('revisions')).filter((r) => !r.sheetSaved && !r.summary);
+      syncImages = pending.flatMap((r) => r.entry.images);
+      for (const revision of pending) {
+        for (const image of revision.entry.images) await uploadPhoto(image);
+        for (const removed of revision.entry.removedImages || []) {
+          const original = await store.get('assets', removed.id);
+          removed.driveId ||= original?.driveId;
+          const thumb = await store.get(
+            'assets',
+            removed.thumbnail?.id || `${removed.id}-thumbnail`,
+          );
+          if (thumb?.driveId)
+            removed.thumbnail = {
+              id: thumb.id,
+              name: thumb.name,
+              type: thumb.type,
+              driveId: thumb.driveId,
+            };
+        }
+        await store.acknowledgeRevision(revision);
+        await repository.save(revision);
+        delete revision.entry.removedImages;
+        await store.acknowledgeRevision({ ...revision, sheetSaved: true, remoteKnown: true });
+        saved = true;
+      }
+      await load();
+    } while (syncAgain || (await store.all('revisions')).some((r) => !r.sheetSaved && !r.summary));
+    if (!entry && !busy) await refresh();
+    syncImages = [];
+    await cleanLocalPhotos(entry?.images || []);
+    if (saved && !syncAgain) toast('Google Sheets에 저장했습니다.');
+  })().finally(() => {
+    syncWork = null;
+    syncing = false;
+    syncImages = [];
+    connection();
+    if (syncAgain) queueMicrotask(() => syncCloud().catch((error) => toast(error.message, true)));
+  });
+  return syncWork;
+}
+function saveAndClose() {
+  if (!editing || !dirty || busy) return;
+  task(async () => {
+    await save(false, true);
+    await closeEditor();
+    toast('기기에 저장했습니다.');
+    return true;
+  }).then((committed) => {
+    if (!committed) return;
+    resumeConnection().catch((error) => toast(`기기에 저장되어 있습니다. ${error.message}`, true));
+  });
 }
 async function openEntry(id, date = day || localDate()) {
   await save(false);
@@ -349,16 +423,18 @@ async function openEntry(id, date = day || localDate()) {
   parents = revision ? [revision.id] : [];
   activeRevision = revision?.id || '';
   dirty = false;
+  editing = !revision;
   savedContent = JSON.stringify(entry);
   const draft = await store.get('drafts', entry.id);
   if (draft) {
     entry = draft.entry;
     parents = draft.parents;
     dirty = true;
+    editing = true;
   }
   fillEditor();
   if (!$('#editor-dialog').open) $('#editor-dialog').showModal();
-  $('#entry-title').focus();
+  desiredFocus = editing ? $('#entry-title') : $('#edit-entry');
 }
 function fieldDefinition(field) {
   return definitions.find((d) => d.id === field.id) || { ...field, type: 'text', options: [] };
@@ -383,7 +459,33 @@ function renderFields() {
     })
     .join('');
 }
+function renderReading() {
+  $('#editor-form').classList.toggle('reading', !editing);
+  $('#reading-title').textContent = entry.title || '제목 없는 일기';
+  $('#reading-date').textContent = entry.date;
+  $('#reading-body').textContent = entry.body;
+  $('#reading-details').innerHTML = [
+    entry.tags.length
+      ? `<p class="reading-tags">${entry.tags.map((tag) => escape('#' + tag)).join(' ')}</p>`
+      : '',
+    ...(entry.fields || []).map(
+      (field) =>
+        `<p><strong>${escape(fieldDefinition(field).name)}</strong> ${escape(field.value || '—')}</p>`,
+    ),
+    ...(entry.calendarTemplate === false ? [] : entry.events).map(
+      (event) =>
+        `<article class="reading-event"><h2>${escape(event.title)}</h2><small>${escape(event.allDay ? '종일' : event.start ? new Date(event.start).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '')} ${escape(event.location || '')}</small><p>${escape(event.note || '')}</p></article>`,
+    ),
+  ].join('');
+}
+$('#edit-entry').onclick = () => {
+  editing = true;
+  renderReading();
+  renderPhotos();
+  $('#entry-title').focus();
+};
 function fillEditor() {
+  renderReading();
   $('#entry-title').value = entry.title;
   $('#entry-body').value = entry.body;
   $('#entry-tags').value = entry.tags.join(', ');
@@ -415,7 +517,9 @@ async function renderPhotos() {
   $('#photos').innerHTML = '';
   for (const image of entry.images) {
     const figure = document.createElement('figure');
-    figure.innerHTML = `<figcaption>${escape(image.name)}</figcaption><button type="button" data-remove-photo="${escape(image.id)}">첨부 삭제</button>`;
+    figure.innerHTML = editing
+      ? `<button type="button" class="remove-photo" data-remove-photo="${escape(image.id)}">첨부 삭제</button>`
+      : '';
     $('#photos').append(figure);
     try {
       const blob = await previewBlob(image);
@@ -436,7 +540,6 @@ async function closeEditor() {
   if (dirty && !window.confirm('저장하지 않은 변경 내용이 있습니다. 저장하지 않고 닫을까요?'))
     return;
   if (entry) await store.remove('drafts', entry.id);
-  await cleanLocalPhotos();
   dirty = false;
   savedContent = null;
   $('#editor-dialog').close();
@@ -444,6 +547,7 @@ async function closeEditor() {
   photoGeneration++;
   urls.forEach(URL.revokeObjectURL);
   urls = [];
+  await cleanLocalPhotos(syncImages);
 }
 function small(title, html) {
   $('#small-title').textContent = title;
@@ -745,11 +849,11 @@ function requestClose() {
 }
 $('#editor-form').onsubmit = (e) => {
   e.preventDefault();
-  if (dirty) task(() => save(true, true));
+  saveAndClose();
 };
 $('#save').onclick = (e) => {
   e.preventDefault();
-  if (dirty) task(() => save(true, true));
+  saveAndClose();
 };
 $('#close-editor').onclick = requestClose;
 $('#editor-dialog').addEventListener('cancel', (e) => {
@@ -1115,7 +1219,7 @@ $('#move-local').onclick = () =>
 async function resumeConnection() {
   if (account && settings.authServer && !google.connected()) await google.restoreSession();
   await save();
-  await refresh();
+  if (!entry && !busy) await refresh();
 }
 function backgroundSync() {
   if (
@@ -1123,7 +1227,8 @@ function backgroundSync() {
     document.activeElement?.matches('input,textarea,select,[contenteditable]')
   )
     return;
-  task(resumeConnection);
+  if (busy || syncing) return;
+  resumeConnection().catch((error) => toast(error.message, true));
 }
 window.addEventListener('online', backgroundSync);
 document.addEventListener('visibilitychange', () => {
@@ -1139,7 +1244,7 @@ setInterval(() => {
     backgroundSync();
 }, 25000);
 window.addEventListener('beforeunload', (e) => {
-  if (dirty || busy) {
+  if (dirty || busy || syncing) {
     e.preventDefault();
     e.returnValue = '';
   }
@@ -1148,7 +1253,7 @@ document.addEventListener('keydown', (e) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   if (e.key.toLowerCase() === 's' && entry) {
     e.preventDefault();
-    task(() => save(true, true));
+    saveAndClose();
   }
   if (e.key.toLowerCase() === 'k' && !$('#editor-dialog').open) {
     e.preventDefault();
@@ -1230,7 +1335,7 @@ async function purgeTrash(ask = true) {
     if (ids.includes(r.entry.id)) await store.remove('revisions', r.id);
   for (const d of await store.all('drafts'))
     if (ids.includes(d.entry.id)) await store.remove('drafts', d.id);
-  await cleanLocalPhotos();
+  await cleanLocalPhotos(syncImages);
   await load();
   if (repository) await refresh();
   if (ask) toast(`${ids.length}개 일기를 완전 삭제했습니다.`);

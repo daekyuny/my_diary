@@ -131,6 +131,10 @@ async function mock(context, state) {
             r.appendCells.rows[0].values[0].userEnteredValue.stringValue !== '저장 식별자') ||
           r.updateCells?.start?.sheetId === 100,
       );
+      if (isSave && state.holdWrites) {
+        state.waitingForWrite = true;
+        await new Promise((resolve) => (state.releaseWrite = resolve));
+      }
       if (isSave && state.failWrites) return send({ error: { message: '잠시 저장 실패' } }, 503);
       if (
         body.requests.some(
@@ -209,8 +213,8 @@ async function setup(page) {
 }
 async function saveClose(page) {
   await page.locator('#save').click();
-  await expect(page.locator('#save')).toBeDisabled();
-  await page.locator('#close-editor').click();
+  await expect(page.locator('#editor-dialog')).not.toBeVisible();
+  await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
 }
 const populated = (state) => (state.tabs['일기']?.rows || []).slice(1).filter((r) => r[0]);
 
@@ -236,19 +240,21 @@ test('one sheet row is updated, another device sees the change, and failed write
     await second.locator('#banner-connect').click();
     await expect(second.locator('.record')).toContainText('한 행의 일기');
     await second.locator('.record').click();
+    await second.locator('#edit-entry').click();
     await second.locator('#entry-body').fill('=SUM(1,2) 수정한 내용');
     await saveClose(second);
     expect(populated(state)).toHaveLength(1);
     expect(populated(state)[0][10]).toBe('=SUM(1,2) 수정한 내용');
     await first.locator('#sync').click();
     await first.locator('.record').click();
+    await first.locator('#edit-entry').click();
     await expect(first.locator('#entry-body')).toHaveValue('=SUM(1,2) 수정한 내용');
     await first.locator('#entry-body').fill('실패 후 재전송');
     state.failWrites = true;
     await first.locator('#save').click();
     await expect(first.locator('#toast')).toContainText('저장 실패');
     state.failWrites = false;
-    await first.locator('#close-editor').click();
+    await expect(first.locator('#editor-dialog')).not.toBeVisible();
     await first.locator('#sync').click();
     await expect(first.locator('#connection')).toHaveText('Sheets 연결됨');
     expect(populated(state)).toHaveLength(1);
@@ -342,6 +348,7 @@ test('legacy history collapses to latest content and a nonempty Sheet1 is preser
     expect(populated(state)).toHaveLength(1);
     expect(state.defaultDeleted).not.toBe(true);
     await page.locator('.record').click();
+    await page.locator('#edit-entry').click();
     await expect(page.locator('#entry-body')).toHaveValue('current');
   } finally {
     await context.close();
@@ -406,6 +413,7 @@ test('distinct diaries stay contiguous and editing keeps focus through scheduled
     await expect(page.locator('#settings-connect')).toBeDisabled();
     await page.locator('#close-settings').click();
     await page.locator('.record').first().click();
+    await page.locator('#edit-entry').click();
     await page.locator('#entry-body').fill('계속 입력 중');
     await page.locator('#entry-body').evaluate((el) => el.setSelectionRange(2, 4));
     await page.clock.fastForward(75000);
@@ -460,6 +468,7 @@ test('attachments use separate previews, load originals on demand and delete bot
       await other.locator('#banner-connect').click();
       await expect(other.locator('.record')).toHaveCount(1);
       await other.locator('.record').click();
+      await other.locator('#edit-entry').click();
       await expect(other.locator('.photo-preview img')).toBeVisible();
       expect(state.downloads).toEqual([state.uploads[1].id]);
       await other.locator('[data-open-photo]').click();
@@ -471,13 +480,14 @@ test('attachments use separate previews, load originals on demand and delete bot
       other.once('dialog', (dialog) => dialog.accept());
       await other.locator('#close-editor').click();
       await other.locator('.record').click();
+      await other.locator('#edit-entry').click();
       await expect(other.locator('.photo-preview img')).toBeVisible();
       await other.locator('[data-remove-photo]').click();
       state.failDeletes = true;
       await other.locator('#save').click();
       await expect(other.locator('#toast')).toContainText('사진 삭제 실패');
       state.failDeletes = false;
-      await other.locator('#close-editor').click();
+      await expect(other.locator('#editor-dialog')).not.toBeVisible();
       await other.locator('#sync').click();
       await expect(other.locator('#connection')).toHaveText('Sheets 연결됨');
       expect(state.deleted).toEqual([state.uploads[0].id, state.uploads[1].id]);
@@ -521,5 +531,46 @@ test('simultaneous device cleanup cannot delete rows shifted by the other device
     expect(state.tabs.__MyDiaryLock).toBeUndefined();
   } finally {
     for (const context of contexts) await context.close();
+  }
+});
+
+test('save returns to the list before upload and a newer edit survives the earlier acknowledgement', async ({
+  browser,
+}) => {
+  const state = { exists: false, tabs: {} };
+  const context = await browser.newContext({ serviceWorkers: 'block' });
+  await mock(context, state);
+  try {
+    const page = await context.newPage();
+    await setup(page);
+    await page.locator('#quick-entry').click();
+    await page.locator('#entry-title').fill('저장 중인 일기');
+    await page.locator('#entry-body').fill('첫 내용');
+    state.holdWrites = true;
+    await page.locator('#save').click();
+    await expect(page.locator('#editor-dialog')).not.toBeVisible();
+    await expect.poll(() => state.waitingForWrite).toBe(true);
+    await expect(page.locator('#quick-entry')).toBeEnabled();
+    await page.locator('.record').click();
+    await expect(page.locator('#entry-reading')).toBeVisible();
+    await expect(page.locator('#entry-body')).not.toBeVisible();
+    await expect(page.locator('#reading-body')).toHaveText('첫 내용');
+    await page.locator('#edit-entry').click();
+    await page.locator('#entry-body').fill('뒤이어 수정한 최신 내용');
+    await page.locator('#save').click();
+    await expect(page.locator('#editor-dialog')).not.toBeVisible();
+    state.holdWrites = false;
+    state.releaseWrite();
+    await expect(page.locator('#toast')).toContainText('Google Sheets에 저장했습니다.');
+    await expect(page.locator('#connection')).toHaveText('Sheets 연결됨');
+    expect(populated(state)).toHaveLength(1);
+    expect(populated(state)[0][10]).toBe('뒤이어 수정한 최신 내용');
+    await page.reload();
+    await page.locator('.record').click();
+    await expect(page.locator('#reading-body')).toHaveText('뒤이어 수정한 최신 내용');
+  } finally {
+    state.holdWrites = false;
+    state.releaseWrite?.();
+    await context.close();
   }
 });

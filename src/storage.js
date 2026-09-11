@@ -85,3 +85,37 @@ export function replaceCurrent(revision) {
     tx.onabort = () => reject(tx.error || new Error('기기에 저장하지 못했습니다.'));
   });
 }
+
+// A cloud acknowledgement must never replace a newer local edit of the same diary.
+export function acknowledgeRevision(revision) {
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction('revisions', 'readwrite');
+    const records = tx.objectStore('revisions');
+    const request = records.get(revision.id);
+    request.onsuccess = () => {
+      if (request.result) records.put(revision);
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('저장 상태를 갱신하지 못했습니다.'));
+  });
+}
+
+// Refresh may finish while a local save is committing. Check for pending edits
+// inside the same transaction that installs the remote row.
+export function mergeRemoteRevision(revision) {
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction('revisions', 'readwrite');
+    const records = tx.objectStore('revisions');
+    const request = records.getAll();
+    request.onsuccess = () => {
+      const same = request.result.filter((r) => r.entry.id === revision.entry.id);
+      if (same.some((r) => !r.sheetSaved)) return;
+      for (const row of same) records.delete(row.id);
+      records.put(revision);
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('최신 기록을 반영하지 못했습니다.'));
+  });
+}
