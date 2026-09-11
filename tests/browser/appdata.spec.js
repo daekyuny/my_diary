@@ -1,6 +1,39 @@
 import { test, expect } from '@playwright/test';
 import { newEntry, makeRevision } from '../../src/model.js';
 import { mock, state, connect, device } from './appdata-helpers.js';
+test('reload reuses private JSON cache and sync icon animates until connection completes', async ({
+  browser,
+}, testInfo) => {
+  const data = state();
+  data.legacy = makeRevision({ ...newEntry(), title: '새로고침 캐시' });
+  const context = await browser.newContext(device(testInfo));
+  try {
+    await mock(context, data);
+    const page = await context.newPage();
+    await connect(page, false);
+    const seed = [...data.files.values()].find((f) => f.appProperties.kind === 'seed');
+    data.calls.length = 0;
+    let release;
+    const gate = new Promise((resolve) => {
+      release = resolve;
+    });
+    await page.route('https://www.googleapis.com/drive/v3/about**', async (route) => {
+      await gate;
+      await route.fallback();
+    });
+    await page.reload();
+    await expect(page.locator('#sync')).toHaveAttribute('aria-busy', 'true');
+    await expect(page.locator('#sync svg')).toHaveCSS('animation-name', 'diary-sync-spin');
+    release();
+    await expect(page.locator('#connection')).toHaveText('클라우드 연결됨');
+    await expect(page.locator('#sync')).toHaveAttribute('aria-busy', 'false');
+    await expect(page.locator('#sync svg')).toHaveCSS('animation-name', 'none');
+    expect(data.calls.filter((call) => call === `GET /drive/v3/files/${seed.id}`)).toHaveLength(0);
+    await expect(page.locator('.record')).toContainText('새로고침 캐시');
+  } finally {
+    await context.close();
+  }
+});
 test('private storage saves and restores on another device without visible Drive files', async ({
   browser,
 }, testInfo) => {

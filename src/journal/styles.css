@@ -383,6 +383,19 @@ svg {
   width: 14px;
   height: 14px;
 }
+.sync-button.is-syncing svg {
+  animation: diary-sync-spin 1s linear infinite;
+}
+@keyframes diary-sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sync-button.is-syncing svg {
+    animation: none;
+  }
+}
 .mobile-brand {
   display: none;
 }

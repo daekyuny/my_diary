@@ -1,4 +1,5 @@
 import { recentIds } from './cache.js';
+import { revisionCache } from './revision-cache.js';
 import { icon, hydrateIcons } from './icons.js';
 import { escape, visibleGroups, cards, calendarHTML } from './views.js';
 import {
@@ -119,6 +120,8 @@ async function task(fn) {
   }
 }
 function connection() {
+  $('#sync').classList.toggle('is-syncing', busy || syncing);
+  $('#sync').setAttribute('aria-busy', String(busy || syncing));
   const online = google.connected() && navigator.onLine;
   const pending = groups.filter((group) => !group.latest.sheetSaved).length;
   $('#connection').textContent =
@@ -308,6 +311,7 @@ async function refresh() {
     if (r.sheetSaved && !current.has(r.id)) await store.remove('revisions', r.id);
   for (const revision of remote) {
     const existing = local.get(revision.id);
+    if (existing && JSON.stringify(existing) === JSON.stringify(revision)) continue;
     const pending = [...local.values()].find(
       (r) => r.entry.id === revision.entry.id && !r.sheetSaved,
     );
@@ -324,7 +328,7 @@ async function refresh() {
   }
   const recent = recentIds(remote);
   const missing = remote.filter(
-    (r) => recent.has(r.id) && (!local.has(r.id) || local.get(r.id).summary),
+    (r) => !repository.private && recent.has(r.id) && (!local.has(r.id) || local.get(r.id).summary),
   );
   for (let i = 0; i < missing.length; i += 20) {
     const full = await repository.readMany(missing.slice(i, i + 20));
@@ -333,6 +337,7 @@ async function refresh() {
   const drafts = new Set((await store.all('drafts')).map((d) => d.entry.id));
   for (const revision of remote) {
     if (
+      !repository.private &&
       !recent.has(revision.id) &&
       entry?.id !== revision.entry.id &&
       !drafts.has(revision.entry.id)
@@ -636,6 +641,7 @@ function openSettings() {
 }
 async function selectRepository(id, closeSettings = true) {
   const candidate = await migrateRepository(id, {
+    cacheStore: revisionCache(JSON.stringify([settings.googleClientId, account.permissionId, id])),
     progress: (message) => {
       syncProgress = message;
       connection();

@@ -35,6 +35,63 @@ async function setup(revisions = []) {
   const repo = await migrateRepository('sheet', { io, snapshot });
   return { io, repo, snapshot };
 }
+test('reload reuses immutable JSON while discovering new revisions and purge markers', async () => {
+  const first = makeRevision(newEntry());
+  const { io } = await setup([first]);
+  const cached = new Map();
+  const cacheStore = {
+    async load() {
+      return [...cached].map(([id, revision]) => ({ id, revision }));
+    },
+    async put(id, revision) {
+      cached.set(id, revision);
+    },
+    async prune(ids) {
+      for (const id of cached.keys()) if (!ids.has(id)) cached.delete(id);
+    },
+  };
+  const reads = [];
+  const read = io.read.bind(io);
+  io.read = async (id) => {
+    reads.push(id);
+    return read(id);
+  };
+  await new AppDataRepository('sheet', io, { cacheStore }).list();
+  const seedId = [...cached.keys()][0];
+  reads.length = 0;
+  const refreshed = new AppDataRepository('sheet', io, { cacheStore });
+  assert.equal((await refreshed.list())[0].id, first.id);
+  assert.ok(!reads.includes(seedId));
+  const newer = makeRevision({ ...first.entry, body: 'another device' }, [first.id]);
+  const newId = await io.write('sheet', 'revision', newer.id, new Blob([JSON.stringify(newer)]));
+  assert.equal((await refreshed.list())[0].entry.body, 'another device');
+  assert.equal(reads.filter((id) => id === newId).length, 1);
+  await io.write('sheet', 'purge', first.entry.id, new Blob(['{}']));
+  assert.deepEqual(await refreshed.list(), []);
+  assert.equal(cached.size, 0);
+});
+test('cold loading bounds parallel reads and survives unavailable local cache', async () => {
+  const revisions = Array.from({ length: 20 }, () => makeRevision(newEntry()));
+  const { io } = await setup(revisions);
+  const read = io.read.bind(io);
+  let active = 0,
+    peak = 0;
+  io.read = async (id) => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    active--;
+    return read(id);
+  };
+  const unavailable = async () => {
+    throw new Error('cache unavailable');
+  };
+  const repo = new AppDataRepository('sheet', io, {
+    cacheStore: { load: unavailable, put: unavailable, prune: unavailable },
+  });
+  assert.equal((await repo.list()).length, 20);
+  assert.ok(peak > 1 && peak <= 6);
+});
 test('migration preserves diary contents, metadata and source while copying original and thumbnail', async () => {
   const io = memory();
   const photo = await io.write('old', 'original', 'p', new Blob(['original']));

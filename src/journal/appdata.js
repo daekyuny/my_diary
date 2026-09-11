@@ -78,7 +78,7 @@ function portable(revision) {
   return result;
 }
 export class AppDataRepository {
-  constructor(id, io = driveStore) {
+  constructor(id, io = driveStore, { cacheStore, progress = () => {} } = {}) {
     this.id = id;
     this.io = io;
     this.index = [];
@@ -86,9 +86,11 @@ export class AppDataRepository {
     this.migrated = true;
     this.private = true;
     this.cache = new Map();
+    this.cacheStore = cacheStore;
+    this.progress = progress;
   }
-  async prepare() {
-    const roots = await this.io.list(this.id, 'root');
+  async prepare(roots) {
+    roots ||= await this.io.list(this.id, 'root');
     if (!roots.length) throw new Error('앱 전용 저장소 연결 또는 이전이 필요합니다.');
     this.root = await readJSON(this.io, roots[0].id);
     if (this.root.format !== FORMAT) throw new Error('지원하지 않는 저장소 형식입니다.');
@@ -107,12 +109,51 @@ export class AppDataRepository {
         f,
       ]),
     );
+    if (!this.cacheLoaded) {
+      // Cache failures must never prevent cloud access or acknowledge pending edits.
+      for (const item of (await this.cacheStore?.load().catch(() => [])) || []) {
+        try {
+          if (readable.has(item.id)) this.cache.set(item.id, validateRevision(item.revision));
+        } catch {
+          /* Invalid cache entries are downloaded again. */
+        }
+      }
+      this.cacheLoaded = true;
+    }
+    const missing = [...readable.values()].filter((f) => !this.cache.has(f.id));
+    let next = 0,
+      completed = 0,
+      failed = false;
+    if (missing.length) this.progress(`일기 불러오는 중 0/${missing.length}`);
+    // Bound concurrency instead of adding one network round trip per diary in series.
+    const workers = await Promise.allSettled(
+      Array.from({ length: Math.min(6, missing.length) }, async () => {
+        while (!failed && next < missing.length) {
+          const file = missing[next++];
+          try {
+            const revision = validateRevision(await readJSON(this.io, file.id));
+            this.cache.set(file.id, revision);
+            await this.cacheStore?.put(file.id, revision).catch(() => {});
+            this.progress(`일기 불러오는 중 ${++completed}/${missing.length}`);
+          } catch (error) {
+            failed = true;
+            throw error;
+          }
+        }
+      }),
+    );
+    const failure = workers.find((worker) => worker.status === 'rejected');
+    if (failure) throw failure.reason;
     for (const file of readable.values()) {
-      if (!this.cache.has(file.id))
-        this.cache.set(file.id, validateRevision(await readJSON(this.io, file.id)));
       const revision = this.cache.get(file.id);
       if (!this.purged.has(revision.entry.id)) unique.set(revision.id, revision);
     }
+    const retained = new Set(
+      [...readable.keys()].filter((id) => !this.purged.has(this.cache.get(id).entry.id)),
+    );
+    for (const id of this.cache.keys()) if (!retained.has(id)) this.cache.delete(id);
+    await this.cacheStore?.prune(retained).catch(() => {});
+    this.progress('');
     this.versions = [...unique.values()];
     this.index = entryGroups(this.versions).map((group) => {
       const result = { ...structuredClone(group.latest), sheetSaved: true, remoteKnown: true };
@@ -196,6 +237,7 @@ export class AppDataRepository {
     for (const id of ids) await this.io.write(this.id, 'purge', id, jsonBlob({ id }));
     // Repeat interrupted deletion on subsequent runs; tombstones block offline resurrection.
     const doomed = new Set([...this.purged, ...ids]);
+    if (!doomed.size) return [];
     for (const file of this.files.filter((f) =>
       ['revision', 'seed'].includes(f.appProperties.kind),
     )) {
@@ -268,11 +310,12 @@ export async function sheetSnapshot(id) {
 }
 export async function migrateRepository(
   id,
-  { io = driveStore, snapshot = sheetSnapshot, progress = () => {} } = {},
+  { io = driveStore, snapshot = sheetSnapshot, progress = () => {}, cacheStore } = {},
 ) {
-  const repository = new AppDataRepository(id, io);
-  if ((await io.list(id, 'root')).length) {
-    await repository.prepare();
+  const repository = new AppDataRepository(id, io, { cacheStore, progress });
+  const roots = await io.list(id, 'root');
+  if (roots.length) {
+    await repository.prepare(roots);
     return repository;
   }
   const initial = await snapshot(id);
