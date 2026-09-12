@@ -10,6 +10,7 @@ const SHELL = [
   '/vendor/journal-app.js',
   '/src/journal/styles.css',
   '/src/app.js',
+  '/src/body-links.js',
   '/src/model.js',
   '/src/storage.js',
   '/src/google.js',

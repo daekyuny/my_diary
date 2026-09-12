@@ -1090,9 +1090,15 @@ dialog::backdrop {
 }
 .preview-body {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   line-height: 2;
   margin: 22px 0;
   min-height: 130px;
+}
+.preview-body a {
+  color: var(--green);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 .preview-actions {
   display: flex;

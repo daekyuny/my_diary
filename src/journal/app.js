@@ -1,4 +1,5 @@
 import { recentIds } from './cache.js';
+import { renderBody } from '../body-links.js';
 import { revisionCache } from './revision-cache.js';
 import { openPhoto } from './photo-viewer.js';
 import { appUpdates } from './updates.js';
@@ -526,7 +527,7 @@ function renderReading() {
   $('#editor-form').classList.toggle('reading', !editing);
   $('#reading-title').textContent = entry.title || '제목 없는 일기';
   $('#reading-date').textContent = entry.date;
-  $('#reading-body').textContent = entry.body;
+  renderBody($('#reading-body'), entry.body);
   $('#reading-details').innerHTML = [
     entry.tags.length
       ? `<p class="reading-tags">${entry.tags.map((tag) => escape('#' + tag)).join(' ')}</p>`

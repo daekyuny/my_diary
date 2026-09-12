@@ -9,6 +9,7 @@ import {
   markdown,
 } from './model.js';
 import * as store from './storage.js';
+import { renderBody } from './body-links.js';
 import * as google from './google.js';
 import { syncDrive as syncDriveRemote, assetBlob } from './sync.js';
 import { findLocations, currentLocation, fetchWeather } from './weather.js';
@@ -857,12 +858,14 @@ async function renderPreview() {
     $('.preview-weather').innerHTML =
       `<div class="weather-detail">${escape(w.label)} · ${escape(w.min)}–${escape(w.max)}°C · ${escape(w.location.name)}<br /><small>${escape(w.date)} · ${escape(w.kind)} · <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a></small></div>`;
   }
-  // All user content is rendered as text. Inline images join the thumbnail gallery.
-  $('.preview-body').textContent =
+  // Inline images join the thumbnail gallery.
+  renderBody(
+    $('.preview-body'),
     snapshot.body.replace(/!\[[^\]]*\]\(diary-image:[\w-]+\)/g, '').trim() ||
-    (snapshot.events.length || snapshot.images.length
-      ? ''
-      : '아직 기록이 없습니다. 편집을 눌러 오늘의 이야기를 남겨보세요.');
+      (snapshot.events.length || snapshot.images.length
+        ? ''
+        : '아직 기록이 없습니다. 편집을 눌러 오늘의 이야기를 남겨보세요.'),
+  );
   if (snapshot.calendarTemplate !== false)
     $('.preview-events').innerHTML = snapshot.events
       .map(
