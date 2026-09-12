@@ -118,7 +118,8 @@ JPG·PNG·WebP·GIF, 사진당 10MB까지 지원합니다. 일기를 열면 썸�
 - `src/app.js`, `legacy.html`: 이전 Drive 일기 앱
 - `scripts/`: esbuild 번들·개발 서버·정적 빌드
 - `tests/`: 모델·ZIP·API 요청 테스트와 Playwright PC·모바일 테스트
-- `artifacts/journal-*.png`: 개인 데이터 없는 예시 기록의 화면 캡처
+
+테스트 캡처(`artifacts/`), 실행 결과(`test-results/`, `playwright-report/`), 빌드 생성물(`dist/`, `vendor/`)은 Git에 포함하지 않습니다. 검증을 마치면 로컬 생성물과 임시 진단 파일을 정리합니다. 실패한 CI 테스트의 추적 자료는 GitHub Actions에서 7일간 보관합니다.
 
 현재 배포 대상은 `burndown-studio` 프로젝트의 `daekyuny-diary` 사이트입니다. Firebase는 Hosting에만 사용하며 Firestore·Firebase Storage는 필요 없습니다. 기존 `.github/workflows/deploy.yml`은 검사 후 `main` push 시 배포합니다. 이번 작업은 로컬 구현이며 실제 사이트 배포는 별도입니다.
 

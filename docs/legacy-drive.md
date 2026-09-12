@@ -190,7 +190,7 @@ README.txt
 - `assets/`: 아이콘. PNG는 `scripts/icons.mjs`로 재생성
 - `scripts/`: 개발 서버, 정적 빌드, 알림 키 생성
 - `tests/`: 데이터·암호화 테스트 및 브라우저 테스트
-- `artifacts/`: 테스트용 예시 기록의 화면 캡처
+- `artifacts/`: 테스트 시 생성되는 화면 캡처(Git 제외, 검증 후 정리)
 - `firebase.json`: 무료 Hosting 배포 설정
 
 현재 무료 정책과 개인 사용량 범위에서 월 운영비 0원을 목표로 합니다. 정책의 영구 유지는 보장되지 않으며 Drive 저장공간은 본인 계정의 여유 공간을 사용합니다. Firebase는 Spark, Cloudflare는 Free를 유지하세요. 유료 요금제에 자동 가입하는 코드는 없습니다.
