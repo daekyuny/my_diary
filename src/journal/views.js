@@ -93,3 +93,62 @@ export function validateDefinition(field) {
     throw new Error('선택지를 하나 이상 입력해주세요.');
   return field;
 }
+export const visibleEvents = (entry) => (entry.calendarTemplate === false ? [] : entry.events);
+export const eventTime = (event) =>
+  event.allDay
+    ? '종일'
+    : event.start
+      ? new Date(event.start).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+      : '';
+export function tagOptionsHTML(tags) {
+  return (
+    '<option value="">모든 태그</option>' +
+    tags.map((t) => `<option value="${escape(t)}">${escape(t)}</option>`).join('')
+  );
+}
+export function tagLinksHTML(tags, active) {
+  return tags.length
+    ? tags
+        .map(
+          (t) =>
+            `<button class="label-link ${t === active ? 'active' : ''}" data-label="${escape(t)}">${escape(t)}</button>`,
+        )
+        .join('')
+    : '<p class="muted">기록에 태그를 붙여 모아보세요.</p>';
+}
+export function tagSuggestionsHTML(tags) {
+  return tags.map((t) => `<option value="${escape(t)}"></option>`).join('');
+}
+export function readingDetailsHTML(entry) {
+  return [
+    entry.tags.length
+      ? `<p class="reading-tags">${entry.tags.map((tag) => escape('#' + tag)).join(' ')}</p>`
+      : '',
+    ...visibleEvents(entry).map(
+      (event) =>
+        `<article class="reading-event"><h2>${escape(event.title)}</h2><small>${escape(eventTime(event))} ${escape(event.location || '')}</small><p>${escape(event.note || '')}</p></article>`,
+    ),
+  ].join('');
+}
+export function eventsHTML(entry) {
+  return visibleEvents(entry)
+    .map(
+      (event, i) =>
+        `<article><div class="event-top"><input data-event-title="${i}" value="${escape(event.title)}" aria-label="일정 제목"/><button type="button" data-remove-event="${i}" aria-label="${escape(event.title)} 일정 제거">${icon('close')}</button></div><small>${escape(eventTime(event))} ${escape(event.location || '')}</small><textarea data-event-note="${i}" aria-label="일정 메모" placeholder="이 일정에서 기억할 것">${escape(event.note)}</textarea></article>`,
+    )
+    .join('');
+}
+export function conflictHTML(revision) {
+  return `<p>같은 일기가 다른 기기에서도 수정됐습니다. 기기 수정본과 클라우드 기록을 별도로 보존할 수 있습니다.</p><h3>이 기기</h3><pre>${escape(revision.entry.body)}</pre><h3>클라우드</h3><pre>${escape(revision.conflict.entry.body)}</pre><button id="keep-conflict-copy" class="primary">기기 수정본을 별도 일기로 보존</button>`;
+}
+export function calendarChoiceHTML(date, calendars) {
+  return `<p>${escape(date)}의 일정을 가져옵니다. Google 일정 원본은 수정하지 않습니다.</p>${calendars.map((c) => `<label class="form-label"><input type="checkbox" name="calendar-choice" value="${escape(c.id)}" ${c.primary ? 'checked' : ''}/> ${escape(c.summary)}</label>`).join('')}<button id="import-events" class="primary">선택한 일정 가져오기</button>`;
+}
+export function repositoryOptionsHTML(files) {
+  return files
+    .map(
+      (file) =>
+        `<option value="${escape(file.id)}">${escape(file.name)} · ${escape(file.id.slice(-8))}</option>`,
+    )
+    .join('');
+}

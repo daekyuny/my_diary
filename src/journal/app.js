@@ -1,31 +1,64 @@
-import { recentIds } from './cache.js';
+// Journal controller: owns screen state and wires DOM events to the modules below.
 import { renderBody } from '../body-links.js';
 import { revisionCache } from './revision-cache.js';
 import { openPhoto } from './photo-viewer.js';
 import { appUpdates } from './updates.js';
-import { icon, hydrateIcons } from './icons.js';
-import { escape, visibleGroups, cards, calendarHTML } from './views.js';
+import { hydrateIcons } from './icons.js';
+import {
+  escape,
+  visibleGroups,
+  cards,
+  calendarHTML,
+  tagOptionsHTML,
+  tagLinksHTML,
+  tagSuggestionsHTML,
+  readingDetailsHTML,
+  eventsHTML,
+  conflictHTML,
+  calendarChoiceHTML,
+  repositoryOptionsHTML,
+} from './views.js';
+import {
+  connectionLabel,
+  repositoryDetails,
+  saveStateLabel,
+  pageTitle,
+  pageDescription,
+  quickLabel,
+  weekday,
+  todayLabel,
+  characterCount,
+} from './labels.js';
 import {
   findRepositories as findSheets,
   createRepository as createSheet,
   migrateRepository,
 } from './appdata.js';
-import { parseArchive, stableKeepIds, makeBackup } from './backup.js';
 import { newEntry, localDate, validDate, makeRevision, mergeEvents } from '../model.js';
-import { entryGroups, expired } from './current.js';
+import { expired, nextRevision } from './current.js';
+import { $, toast, download } from './dom.js';
+import { loadSettings, saveSettings, ownerKey } from './settings.js';
+import {
+  loadGroups,
+  pendingRevisions,
+  conflictedRevisions,
+  recoverDrafts,
+  adoptRecords,
+  snapshotStore,
+  collectStore,
+  removeEntries,
+} from './local.js';
+import { hydrateRevision, pullRemote } from './remote.js';
+import { batches, pushBatch } from './cloud-sync.js';
+import { importArchive, exportArchive } from './transfer.js';
+import { eventsForDate, manualEvent } from './calendar.js';
 import * as store from '../storage.js';
 import * as google from '../google.js';
 import { createPhoto, previewBlob, uploadPhoto, cleanLocalPhotos } from './photos.js';
 import { assetBlob } from '../sync.js';
 
-const $ = (selector) => document.querySelector(selector);
 hydrateIcons();
-let settings;
-try {
-  settings = JSON.parse(localStorage.getItem('my-diary-sheets-settings') || '{}');
-} catch {
-  settings = {};
-}
+let settings = loadSettings();
 let account = settings.account || null,
   repository = null,
   groups = [],
@@ -50,7 +83,6 @@ let account = settings.account || null,
   ready = false;
 let draftWrite = Promise.resolve(),
   saveTimer,
-  toastTimer,
   searchTimer,
   searchGeneration = 0,
   photoGeneration = 0,
@@ -61,20 +93,9 @@ let draftWrite = Promise.resolve(),
   visibleLimit = 40,
   lastRefresh = 0;
 let view = ['list', 'board', 'calendar'].includes(settings.view) ? settings.view : 'list';
-const owner = () =>
-  account
-    ? `sheets-${account.permissionId}-${settings.sheets?.[account.permissionId] || 'unassigned'}`
-    : 'sheets-local';
-function persistSettings() {
-  localStorage.setItem('my-diary-sheets-settings', JSON.stringify(settings));
-}
-function toast(message, error = false) {
-  clearTimeout(toastTimer);
-  $('#toast').textContent = message;
-  $('#toast').classList.toggle('error', error);
-  $('#toast').hidden = false;
-  toastTimer = setTimeout(() => ($('#toast').hidden = true), error ? 13000 : 5000);
-}
+const owner = () => ownerKey(account, settings);
+const persistSettings = () => saveSettings(settings);
+const working = () => busy || syncing;
 function locks(value) {
   $('#editor-form')
     .querySelectorAll('input,textarea,select,button')
@@ -124,32 +145,26 @@ async function task(fn) {
   }
 }
 function connection() {
-  $('#sync').classList.toggle('is-syncing', busy || syncing);
-  $('#sync').setAttribute('aria-busy', String(busy || syncing));
+  $('#sync').classList.toggle('is-syncing', working());
+  $('#sync').setAttribute('aria-busy', String(working()));
   const online = google.connected() && navigator.onLine;
   const pending = groups.filter((group) => !group.latest.sheetSaved).length;
-  $('#connection').textContent =
-    busy || syncing
-      ? '저장·연결 중…'
-      : !navigator.onLine
-        ? '오프라인 · 기기 저장'
-        : online && repository
-          ? pending
-            ? '클라우드 저장 대기'
-            : '클라우드 연결됨'
-          : online
-            ? '저장소 연결 필요 · 기기 저장'
-            : account
-              ? 'Google 재연결 필요'
-              : '기기에 저장';
+  $('#connection').textContent = connectionLabel({
+    working: working(),
+    onLine: navigator.onLine,
+    connected: google.connected(),
+    repository,
+    pending,
+    account,
+  });
   $('#sync-progress').textContent =
     syncProgress || (pending ? `${pending}개 기록이 이 기기에서 저장을 기다립니다.` : '');
   $('#resume-sync').hidden = !pending || !repository;
-  $('#resume-sync').disabled = busy || syncing || !navigator.onLine;
+  $('#resume-sync').disabled = working() || !navigator.onLine;
   $('#update-banner').hidden = !updateReady;
   document.querySelectorAll('[data-apply-update]').forEach((button) => {
     button.hidden = !updateReady;
-    button.disabled = busy || syncing || updateApplying;
+    button.disabled = working() || updateApplying;
   });
   $('#connect-banner').hidden = Boolean(online && repository && google.hasAppData());
   $('#account-name').textContent = account?.displayName || '나만의 일기장';
@@ -174,9 +189,9 @@ function connection() {
     'move-local',
     'purge-trash',
   ])
-    $('#' + id).disabled = busy || syncing;
+    $('#' + id).disabled = working();
   for (const id of ['connect', 'banner-connect', 'settings-connect']) {
-    $('#' + id).disabled = busy || syncing || (online && google.hasAppData());
+    $('#' + id).disabled = working() || (online && google.hasAppData());
   }
   $('#sheet-options').hidden = false;
   $('#sheet-select').parentElement.hidden = !$('#sheet-select').options.length;
@@ -193,19 +208,14 @@ function connection() {
   if (!$('#settings-dialog').open)
     $('#trash-days').value = String(repository?.retentionDays ?? settings.trashDays ?? 30);
   $('#move-local').hidden = !account || !repository;
-  $('#sheet-details').textContent = repository
-    ? `저장소 ID: ${repository.id} · 클라우드 일기 ${repository.index.filter((r) => !r.entry.deletedAt).length}개 · 휴지통 ${repository.index.filter((r) => r.entry.deletedAt).length}개 · 이 기기 저장 대기 ${pending}개${online ? '' : ' · 재연결 후 최신 개수 확인'}`
-    : '연결된 저장소 없음 · 현재 기록은 이 기기에만 저장됩니다.';
+  $('#sheet-details').textContent = repositoryDetails(repository, pending, online);
   if (entry)
-    $('#save-state').textContent = dirty
-      ? '저장하지 않은 변경'
-      : groups.find((g) => g.latest.entry.id === entry.id)?.heads.length > 1
-        ? '다른 기기 수정 확인'
-        : groups.find((g) => g.latest.id === activeRevision)?.latest.sheetSaved
-          ? '✓ 클라우드 저장 완료'
-          : activeRevision
-            ? '✓ 기기에 저장'
-            : '새 기록';
+    $('#save-state').textContent = saveStateLabel({
+      dirty,
+      conflicted: groups.find((g) => g.latest.entry.id === entry.id)?.heads.length > 1,
+      cloudSaved: groups.find((g) => g.latest.id === activeRevision)?.latest.sheetSaved,
+      activeRevision,
+    });
 }
 function filter() {
   return {
@@ -220,21 +230,10 @@ function filter() {
 function render() {
   const tags = [...new Set(groups.flatMap((g) => g.latest.entry.tags))].sort(),
     tag = $('#tag-filter').value;
-  $('#tag-filter').innerHTML =
-    '<option value="">모든 태그</option>' +
-    tags.map((t) => `<option value="${escape(t)}">${escape(t)}</option>`).join('');
+  $('#tag-filter').innerHTML = tagOptionsHTML(tags);
   $('#tag-filter').value = tag;
-  $('#sidebar-labels').innerHTML = tags.length
-    ? tags
-        .map(
-          (t) =>
-            `<button class="label-link ${t === tag ? 'active' : ''}" data-label="${escape(t)}">${escape(t)}</button>`,
-        )
-        .join('')
-    : '<p class="muted">기록에 태그를 붙여 모아보세요.</p>';
-  $('#tag-suggestions').innerHTML = tags
-    .map((t) => `<option value="${escape(t)}"></option>`)
-    .join('');
+  $('#sidebar-labels').innerHTML = tagLinksHTML(tags, tag);
+  $('#tag-suggestions').innerHTML = tagSuggestionsHTML(tags);
   const base = filter(),
     shown = visibleGroups(groups, { ...base, ...(view === 'calendar' ? { month, day } : {}) });
   $('#records').className = `records ${view === 'board' ? 'board' : 'list'}`;
@@ -249,20 +248,9 @@ function render() {
       : '');
   $('#result-count').textContent = `${shown.length}개의 기록`;
   $('#total-count').textContent = groups.filter((g) => !g.latest.entry.archived).length;
-  $('#page-title').innerHTML =
-    {
-      journal: view === 'calendar' ? '날짜로 보는 기록' : '나의 기록',
-      pinned: '고정한 기록',
-      archive: '삭제한 기록',
-    }[collection] + '<span class="title-dot">.</span>';
-  $('#page-description').textContent =
-    collection === 'archive'
-      ? '잠시 접어둔 기억도 이곳에 그대로.'
-      : collection === 'pinned'
-        ? '자주 꺼내 보고 싶은 나의 순간들.'
-        : '평범한 하루에도, 기억하고 싶은 순간은 있으니까.';
-  $('#quick-label').textContent =
-    view === 'calendar' && day ? `${day}에 새 기록 남기기` : '오늘은 어떤 하루였나요?';
+  $('#page-title').innerHTML = pageTitle(collection, view) + '<span class="title-dot">.</span>';
+  $('#page-description').textContent = pageDescription(collection);
+  $('#quick-label').textContent = quickLabel(view, day);
   $('#calendar').hidden = view !== 'calendar';
   if (view === 'calendar')
     $('#calendar').innerHTML = calendarHTML(month, day, visibleGroups(groups, base));
@@ -288,69 +276,16 @@ function render() {
 }
 async function load() {
   const generation = ++loadGeneration;
-  const revisions = await store.all('revisions');
-  for (const r of revisions) {
-    if (r.entry.archived && !r.entry.deletedAt) {
-      r.entry.archived = false;
-      await store.put('revisions', r);
-    }
-  }
-  if (generation !== loadGeneration) return;
-  groups = entryGroups(revisions);
-  const keep = new Set(groups.map((g) => g.latest.id));
-  for (const r of revisions) if (!keep.has(r.id)) await store.remove('revisions', r.id);
+  const loaded = await loadGroups({ cancelled: () => generation !== loadGeneration });
+  if (!loaded) return;
+  groups = loaded;
   if (generation === loadGeneration) render();
 }
-async function hydrate(revision) {
-  if (!revision.summary) return revision;
-  if (!repository || !google.connected())
-    throw new Error('이 기기에 아직 본문이 없습니다. Google에 연결해 불러와주세요.');
-  const full = await repository.read(revision);
-  await store.put('revisions', full);
-  return full;
-}
+const cloud = () => (repository && google.connected() ? repository : null);
+const hydrate = (revision) => hydrateRevision(cloud(), revision);
 async function refresh() {
-  if (!repository || !google.connected() || !navigator.onLine) return;
-  const remote = await repository.list();
-  const local = new Map((await store.all('revisions')).map((r) => [r.id, r]));
-  const current = new Set(remote.map((r) => r.id));
-  for (const r of local.values())
-    if (r.sheetSaved && !current.has(r.id)) await store.remove('revisions', r.id);
-  for (const revision of remote) {
-    const existing = local.get(revision.id);
-    if (existing && JSON.stringify(existing) === JSON.stringify(revision)) continue;
-    const pending = [...local.values()].find(
-      (r) => r.entry.id === revision.entry.id && !r.sheetSaved,
-    );
-    if (pending && pending.id !== revision.id) continue;
-    await store.mergeRemoteRevision(
-      existing &&
-        !existing.summary &&
-        !repository.private &&
-        !revision.conflict &&
-        !existing.conflict
-        ? { ...existing, sheetSaved: true, row: revision.row, tab: revision.tab }
-        : revision,
-    );
-  }
-  const recent = recentIds(remote);
-  const missing = remote.filter(
-    (r) => !repository.private && recent.has(r.id) && (!local.has(r.id) || local.get(r.id).summary),
-  );
-  for (let i = 0; i < missing.length; i += 20) {
-    const full = await repository.readMany(missing.slice(i, i + 20));
-    for (const revision of full) await store.mergeRemoteRevision(revision);
-  }
-  const drafts = new Set((await store.all('drafts')).map((d) => d.entry.id));
-  for (const revision of remote) {
-    if (
-      !repository.private &&
-      !recent.has(revision.id) &&
-      entry?.id !== revision.entry.id &&
-      !drafts.has(revision.entry.id)
-    )
-      await store.mergeRemoteRevision(revision);
-  }
+  if (!cloud() || !navigator.onLine) return;
+  await pullRemote(repository, { activeEntryId: entry?.id });
   await load();
   lastRefresh = Date.now();
   if (entry && !dirty && !editing) {
@@ -376,13 +311,7 @@ async function save(sync = true, commit = false) {
   await draftWrite;
   if (dirty && commit) {
     const previous = groups.find((g) => g.latest.entry.id === entry.id)?.latest;
-    const revision = {
-      ...makeRevision(entry, parents),
-      remoteKnown: Boolean(previous?.sheetSaved || previous?.remoteKnown),
-      baseRevision: previous?.sheetSaved
-        ? previous.id
-        : previous?.baseRevision || previous?.parents?.[0],
-    };
+    const revision = nextRevision(entry, parents, previous);
     await store.replaceCurrent(revision);
     activeRevision = revision.id;
     parents = [revision.id];
@@ -405,68 +334,32 @@ function syncCloud() {
     let saved = false;
     do {
       syncAgain = false;
-      const pending = (await store.all('revisions')).filter(
-        (r) => !r.sheetSaved && !r.summary && !r.conflict,
-      );
+      const pending = await pendingRevisions();
       syncImages = pending.flatMap((r) => r.entry.images);
-      for (let offset = 0; offset < pending.length;) {
-        const batch = [];
-        let bytes = 0;
-        while (offset < pending.length && batch.length < 20) {
-          const size = new TextEncoder().encode(JSON.stringify(pending[offset])).length;
-          if (batch.length && bytes + size > 500000) break;
-          bytes += size;
-          batch.push(pending[offset++]);
-        }
-        for (const revision of batch) {
-          for (const image of revision.entry.images)
-            await uploadPhoto(image, `${repository.id}:${revision.entry.id}`);
-          for (const removed of revision.entry.removedImages || []) {
-            const original = await store.get('assets', removed.id);
-            removed.driveId ||= original?.driveId;
-            const thumb = await store.get(
-              'assets',
-              removed.thumbnail?.id || `${removed.id}-thumbnail`,
-            );
-            if (thumb?.driveId)
-              removed.thumbnail = {
-                id: thumb.id,
-                name: thumb.name,
-                type: thumb.type,
-                driveId: thumb.driveId,
-              };
-          }
-          await store.acknowledgeRevision(revision);
-        }
-        syncProgress = `이번 묶음 ${batch.length}개를 클라우드에 저장하고 있습니다. 전체 저장 대기 ${pending.length - offset + batch.length}개`;
-        connection();
+      let remaining = pending.length;
+      for (const batch of batches(pending)) {
         try {
-          await repository.saveMany(batch);
+          await pushBatch(repository, batch, () => {
+            syncProgress = `이번 묶음 ${batch.length}개를 클라우드에 저장하고 있습니다. 전체 저장 대기 ${remaining}개`;
+            connection();
+          });
         } catch (error) {
           if (error.conflict) {
-            const revision = batch.find((r) => r.id === error.localId);
-            await store.acknowledgeRevision({ ...revision, conflict: error.conflict });
             await load();
             syncAgain = true;
           }
           throw error;
         }
-        for (const revision of batch) {
-          delete revision.entry.removedImages;
-          await store.acknowledgeRevision({ ...revision, sheetSaved: true, remoteKnown: true });
-          saved = true;
-        }
+        remaining -= batch.length;
+        saved = true;
         await load();
       }
       await load();
-    } while (
-      syncAgain ||
-      (await store.all('revisions')).some((r) => !r.sheetSaved && !r.summary && !r.conflict)
-    );
+    } while (syncAgain || (await pendingRevisions()).length);
     if (!entry && !busy) await refresh();
     syncImages = [];
     await cleanLocalPhotos(entry?.images || []);
-    const conflicts = (await store.all('revisions')).filter((r) => r.conflict);
+    const conflicts = await conflictedRevisions();
     syncProgress = conflicts.length
       ? `${conflicts.length}개 일기에 수정 충돌이 있습니다. 해당 일기를 열어 확인해주세요.`
       : '';
@@ -528,22 +421,11 @@ function renderReading() {
   $('#reading-title').textContent = entry.title || '제목 없는 일기';
   $('#reading-date').textContent = entry.date;
   renderBody($('#reading-body'), entry.body);
-  $('#reading-details').innerHTML = [
-    entry.tags.length
-      ? `<p class="reading-tags">${entry.tags.map((tag) => escape('#' + tag)).join(' ')}</p>`
-      : '',
-    ...(entry.calendarTemplate === false ? [] : entry.events).map(
-      (event) =>
-        `<article class="reading-event"><h2>${escape(event.title)}</h2><small>${escape(event.allDay ? '종일' : event.start ? new Date(event.start).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '')} ${escape(event.location || '')}</small><p>${escape(event.note || '')}</p></article>`,
-    ),
-  ].join('');
+  $('#reading-details').innerHTML = readingDetailsHTML(entry);
 }
 $('#resolve-conflict').onclick = () => {
   const revision = conflictingRevision;
-  small(
-    '양쪽에서 수정된 일기',
-    `<p>같은 일기가 다른 기기에서도 수정됐습니다. 기기 수정본과 클라우드 기록을 별도로 보존할 수 있습니다.</p><h3>이 기기</h3><pre>${escape(revision.entry.body)}</pre><h3>클라우드</h3><pre>${escape(revision.conflict.entry.body)}</pre><button id="keep-conflict-copy" class="primary">기기 수정본을 별도 일기로 보존</button>`,
-  );
+  small('양쪽에서 수정된 일기', conflictHTML(revision));
   $('#keep-conflict-copy').onclick = () =>
     task(async () => {
       if (dirty) throw new Error('편집 중인 내용을 먼저 저장하거나 닫은 후 충돌을 확인해주세요.');
@@ -578,24 +460,17 @@ function fillEditor() {
   $('#entry-body').value = entry.body;
   $('#entry-tags').value = entry.tags.join(', ');
   $('#entry-date').value = entry.date;
-  $('#entry-weekday').textContent = new Date(`${entry.date}T12:00:00`).toLocaleDateString('ko-KR', {
-    weekday: 'long',
-  });
+  $('#entry-weekday').textContent = weekday(entry.date);
   $('#pin-entry').setAttribute('aria-pressed', String(Boolean(entry.pinned)));
   $('#pin-entry').setAttribute('aria-label', entry.pinned ? '상단 고정 해제' : '상단 고정');
   $('#archive-entry span:last-child').textContent = entry.archived ? '복원하기' : '삭제하기';
-  $('#word-count').textContent = `${entry.body.length.toLocaleString()}자`;
+  $('#word-count').textContent = characterCount(entry.body);
   renderEvents();
   renderPhotos();
   connection();
 }
 function renderEvents() {
-  $('#events').innerHTML = (entry.calendarTemplate === false ? [] : entry.events)
-    .map(
-      (event, i) =>
-        `<article><div class="event-top"><input data-event-title="${i}" value="${escape(event.title)}" aria-label="일정 제목"/><button type="button" data-remove-event="${i}" aria-label="${escape(event.title)} 일정 제거">${icon('close')}</button></div><small>${escape(event.allDay ? '종일' : event.start ? new Date(event.start).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '')} ${escape(event.location || '')}</small><textarea data-event-note="${i}" aria-label="일정 메모" placeholder="이 일정에서 기억할 것">${escape(event.note)}</textarea></article>`,
-    )
-    .join('');
+  $('#events').innerHTML = eventsHTML(entry);
 }
 async function renderPhotos() {
   const generation = ++photoGeneration;
@@ -657,9 +532,7 @@ async function selectRepository(id, closeSettings = true) {
   await candidate.list();
   await save(false);
   const previousOwner = owner();
-  const unattached = previousOwner.endsWith('-unassigned')
-    ? { revisions: await store.all('revisions'), assets: await store.all('assets') }
-    : null;
+  const unattached = previousOwner.endsWith('-unassigned') ? await snapshotStore() : null;
   repository = candidate;
   if (settings.sheetFolders?.[id]) google.useFolder(settings.sheetFolders[id]);
   settings.sheets ||= {};
@@ -669,12 +542,8 @@ async function selectRepository(id, closeSettings = true) {
     $('#editor-dialog').close();
     entry = null;
     await store.openStore(owner());
-    if (unattached) {
-      for (const asset of unattached.assets) await store.put('assets', asset);
-      for (const revision of unattached.revisions)
-        if (!(await store.get('revisions', revision.id))) await store.put('revisions', revision);
-    }
-    await recover();
+    if (unattached) await adoptRecords(unattached);
+    await recoverDrafts();
     await load();
   }
   await save();
@@ -712,7 +581,7 @@ function connect(calendar = false, choose = false) {
       settings.account = identity;
       persistSettings();
       await store.openStore(owner());
-      await recover();
+      await recoverDrafts();
       await load();
     } else {
       account = identity;
@@ -730,12 +599,7 @@ function connect(calendar = false, choose = false) {
     const showFiles = () => {
       openSettings();
       $('#sheet-options').hidden = false;
-      $('#sheet-select').innerHTML = files
-        .map(
-          (file) =>
-            `<option value="${escape(file.id)}">${escape(file.name)} · ${escape(file.id.slice(-8))}</option>`,
-        )
-        .join('');
+      $('#sheet-select').innerHTML = repositoryOptionsHTML(files);
       $('#select-sheet').hidden = !files.length;
       $('#repair-sheet').hidden = !files.length;
       $('#create-sheet').hidden = Boolean(files.length);
@@ -756,19 +620,6 @@ function connect(calendar = false, choose = false) {
       );
     }
   });
-}
-async function recover() {
-  for (const draft of await store.all('drafts')) {
-    const previous = (await store.all('revisions')).find((r) => r.entry.id === draft.entry.id);
-    const revision = {
-      ...makeRevision(draft.entry, draft.parents),
-      remoteKnown: Boolean(previous?.sheetSaved || previous?.remoteKnown),
-      baseRevision: previous?.sheetSaved
-        ? previous.id
-        : previous?.baseRevision || previous?.parents?.[0],
-    };
-    await store.replaceCurrent(revision);
-  }
 }
 function setView(next) {
   view = next;
@@ -822,22 +673,13 @@ async function searchBodies() {
     $('#search-state').textContent = '전체 본문 검색 완료';
   }
 }
-function download(blob, name) {
-  const url = URL.createObjectURL(blob),
-    link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-}
-
 $('#entry-title').oninput = (e) => {
   entry.title = e.target.value;
   changed();
 };
 $('#entry-body').oninput = (e) => {
   entry.body = e.target.value;
-  $('#word-count').textContent = `${entry.body.length.toLocaleString()}자`;
+  $('#word-count').textContent = characterCount(entry.body);
   changed();
 };
 $('#entry-tags').oninput = (e) => {
@@ -855,10 +697,7 @@ $('#entry-date').onchange = (e) => {
   if (validDate(e.target.value)) {
     entry.date = e.target.value;
     changed();
-    $('#entry-weekday').textContent = new Date(`${entry.date}T12:00:00`).toLocaleDateString(
-      'ko-KR',
-      { weekday: 'long' },
-    );
+    $('#entry-weekday').textContent = weekday(entry.date);
   }
 };
 $('#new-entry').onclick = $('#bottom-new').onclick = () => task(() => openEntry(null, localDate()));
@@ -1002,15 +841,7 @@ $('#events').onclick = (e) => {
 };
 $('#add-event').onclick = () => {
   entry.calendarTemplate = true;
-  entry.events.push({
-    key: `manual:${crypto.randomUUID()}`,
-    title: '새 일정',
-    note: '',
-    start: entry.date,
-    end: entry.date,
-    allDay: true,
-    manual: true,
-  });
+  entry.events.push(manualEvent(entry.date));
   changed();
   renderEvents();
 };
@@ -1031,18 +862,13 @@ $('#get-events').onclick = () => {
 };
 async function getCalendar(date) {
   const calendars = await google.calendars();
-  small(
-    '가져올 Google 캘린더',
-    `<p>${escape(date)}의 일정을 가져옵니다. Google 일정 원본은 수정하지 않습니다.</p>${calendars.map((c) => `<label class="form-label"><input type="checkbox" name="calendar-choice" value="${escape(c.id)}" ${c.primary ? 'checked' : ''}/> ${escape(c.summary)}</label>`).join('')}<button id="import-events" class="primary">선택한 일정 가져오기</button>`,
-  );
+  small('가져올 Google 캘린더', calendarChoiceHTML(date, calendars));
   $('#import-events').onclick = () =>
     task(async () => {
-      const from = new Date(`${date}T00:00:00`),
-        to = new Date(from);
-      to.setDate(to.getDate() + 1);
-      const incoming = [];
-      for (const input of document.querySelectorAll('[name=calendar-choice]:checked'))
-        incoming.push(...(await google.events(input.value, from, to)));
+      const chosen = [...document.querySelectorAll('[name=calendar-choice]:checked')].map(
+        (input) => input.value,
+      );
+      const incoming = await eventsForDate(date, chosen);
       entry.events = mergeEvents(entry.events, incoming, entry.removedEventKeys || []);
       entry.calendarTemplate = true;
       dirty = true;
@@ -1128,7 +954,7 @@ $('#disconnect').onclick = () =>
     entry = null;
     $('#editor-dialog').close();
     await store.openStore(owner());
-    await recover();
+    await recoverDrafts();
     await load();
     $('#sheet-options').hidden = true;
     $('#sheet-select').innerHTML = '';
@@ -1138,18 +964,11 @@ $('#import-input').onchange = () =>
   task(async () => {
     const file = $('#import-input').files[0];
     if (!file) return;
-    if (file.size > 100 * 1024 * 1024) throw new Error('100MB 이하 ZIP을 선택해주세요.');
     toast('ZIP을 확인하고 있습니다…');
-    const parsed = parseArchive(new Uint8Array(await file.arrayBuffer()));
-    await stableKeepIds(parsed.revisions);
-    const existing = new Set((await store.all('revisions')).map((r) => r.id));
-    const fresh = parsed.revisions.filter((r) => !existing.has(r.id));
-    const ids = new Set(fresh.flatMap((r) => r.entry.images).map((i) => i.id));
-    for (const asset of parsed.assets) if (ids.has(asset.id)) await store.put('assets', asset);
-    for (const r of fresh) await store.put('revisions', r);
+    const imported = await importArchive(file);
     await load();
     $('#import-input').value = '';
-    toast(`${fresh.length}개 기록을 가져왔습니다. 클라우드 저장을 진행합니다.`);
+    toast(`${imported}개 기록을 가져왔습니다. 클라우드 저장을 진행합니다.`);
     return true;
   }).then((imported) => {
     if (imported)
@@ -1167,12 +986,9 @@ window.addEventListener('sheets-quota-wait', (event) => {
 $('#export').onclick = () =>
   task(async () => {
     await save();
-    if (repository && google.connected()) await refresh();
-    const revisions =
-      repository?.private && google.connected() ? await repository.backupRevisions() : [];
-    for (const r of await store.all('revisions'))
-      if (!revisions.some((saved) => saved.id === r.id)) revisions.push(await hydrate(r));
-    download(await makeBackup(revisions, assetBlob), `my-diary-${localDate()}.zip`);
+    if (cloud()) await refresh();
+    const archive = await exportArchive({ repository: cloud()?.private ? cloud() : null, hydrate });
+    download(archive.blob, archive.name);
     toast('일기와 사진 원본을 ZIP으로 내보냈습니다.');
   });
 $('#move-local').onclick = () =>
@@ -1180,19 +996,7 @@ $('#move-local').onclick = () =>
     if (!repository || !google.connected())
       throw new Error('먼저 Google에 연결하고 저장소를 선택해주세요.');
     await save(false);
-    const currentOwner = owner();
-    let revisions, assets;
-    try {
-      await store.openStore('sheets-local');
-      await recover();
-      revisions = await store.all('revisions');
-      assets = await store.all('assets');
-    } finally {
-      await store.openStore(currentOwner);
-    }
-    for (const asset of assets) await store.put('assets', asset);
-    for (const r of revisions)
-      if (!(await store.get('revisions', r.id))) await store.put('revisions', r);
+    await adoptRecords(await collectStore(ownerKey(null, settings), owner()));
     await load();
     await save();
     toast('연결 전 기록을 이 계정에 가져왔습니다.');
@@ -1288,14 +1092,9 @@ async function start() {
   settings = { ...config, ...settings, authServer: Boolean(config.authServer) };
   google.configureGoogle(settings.googleClientId, Boolean(settings.authServer));
   await store.openStore(owner());
-  await recover();
+  await recoverDrafts();
   await load();
-  $('#today').textContent = new Date().toLocaleDateString('ko-KR', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    weekday: 'long',
-  });
+  $('#today').textContent = todayLabel();
   ready = true;
   locks(false);
   connection();
@@ -1355,10 +1154,7 @@ async function purgeTrash(ask = true) {
     if (!google.connected()) throw new Error('완전 삭제하려면 Google에 연결해주세요.');
     ids = await repository.purge(days);
   } else ids = groups.filter((g) => expired(g.latest.entry, days)).map((g) => g.latest.entry.id);
-  for (const r of await store.all('revisions'))
-    if (ids.includes(r.entry.id)) await store.remove('revisions', r.id);
-  for (const d of await store.all('drafts'))
-    if (ids.includes(d.entry.id)) await store.remove('drafts', d.id);
+  await removeEntries(ids);
   await cleanLocalPhotos(syncImages);
   await load();
   if (repository) await refresh();

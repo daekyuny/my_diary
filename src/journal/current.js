@@ -1,3 +1,4 @@
+import { makeRevision } from '../model.js';
 // The current app keeps one saved value per diary; the legacy app retains its old model.
 export function entryGroups(revisions) {
   const latest = new Map();
@@ -14,4 +15,14 @@ export function expired(entry, days, now = Date.now()) {
     Number.isFinite(Date.parse(entry.deletedAt)) &&
     Date.parse(entry.deletedAt) <= now - days * 86400000
   );
+}
+// Chain a new revision to the last saved one so the repository can detect concurrent edits.
+export function nextRevision(entry, parents, previous) {
+  return {
+    ...makeRevision(entry, parents),
+    remoteKnown: Boolean(previous?.sheetSaved || previous?.remoteKnown),
+    baseRevision: previous?.sheetSaved
+      ? previous.id
+      : previous?.baseRevision || previous?.parents?.[0],
+  };
 }
