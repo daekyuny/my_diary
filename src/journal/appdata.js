@@ -45,14 +45,15 @@ export const driveStore = {
       `\r\n--${boundary}--`,
     ]);
     const file = await (
-      await google.request('upload/drive/v3/files?uploadType=multipart&fields=id', {
+      await google.request('upload/drive/v3/files?uploadType=multipart&fields=id,sha256Checksum', {
         method: 'POST',
         headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
         body,
       })
     ).json();
-    // Read-after-write verification also detects incomplete uploads before cutover.
-    if ((await digest(await this.read(file.id))) !== (await digest(blob)))
+    // Verify the stored bytes: prefer the checksum Drive returns, otherwise read the file back.
+    const stored = file.sha256Checksum?.toLowerCase() || (await digest(await this.read(file.id)));
+    if (stored !== (await digest(blob)))
       throw new Error('클라우드 저장 검증에 실패했습니다. 기존 데이터는 보존되어 있습니다.');
     return file.id;
   },
@@ -94,9 +95,12 @@ export class AppDataRepository {
     this.root = await readJSON(this.io, roots[0].id);
     if (this.root.format !== FORMAT) throw new Error('지원하지 않는 저장소 형식입니다.');
   }
-  async list() {
+  // `maxAge` reuses a listing fetched within that many milliseconds instead of asking Drive again.
+  async list({ maxAge = 0 } = {}) {
+    if (this.files && Date.now() - this.listedAt < maxAge) return this.index;
     if (!this.root) await this.prepare();
     const files = await this.io.list(this.id);
+    this.listedAt = Date.now();
     const tombstones = files.filter((f) => f.appProperties.kind === 'purge');
     this.purged = new Set(tombstones.map((f) => f.appProperties.key));
     this.files = files;
@@ -154,6 +158,14 @@ export class AppDataRepository {
     await this.cacheStore?.prune(retained).catch(() => {});
     this.progress('');
     this.versions = [...unique.values()];
+    this.rebuildIndex();
+    const settings = files.filter((f) => f.appProperties.kind === 'retention');
+    this.retentionDays = settings.length
+      ? (await readJSON(this.io, settings.at(-1).id)).days
+      : this.root.retentionDays;
+    return this.index;
+  }
+  rebuildIndex() {
     this.index = entryGroups(this.versions).map((group) => {
       const result = { ...structuredClone(group.latest), sheetSaved: true, remoteKnown: true };
       if (group.heads.length > 1) {
@@ -166,11 +178,6 @@ export class AppDataRepository {
       }
       return result;
     });
-    const settings = files.filter((f) => f.appProperties.kind === 'retention');
-    this.retentionDays = settings.length
-      ? (await readJSON(this.io, settings.at(-1).id)).days
-      : this.root.retentionDays;
-    return this.index;
   }
   async backupRevisions() {
     await this.list();
@@ -187,39 +194,45 @@ export class AppDataRepository {
     for (const r of rs) result.push(await this.read(r));
     return result;
   }
-  async saveMany(rs) {
-    for (const r of rs) await this.save(r);
+  save(r) {
+    return this.saveMany([r]);
   }
-  async save(r) {
+  // One listing per batch; written revisions extend the in-memory index directly so callers
+  // see them without another round trip. The next list() reconciles with other devices.
+  async saveMany(rs) {
     await this.list();
-    if (this.purged.has(r.entry.id))
-      throw new Error('이 일기는 다른 기기에서 완전 삭제되었습니다.');
-    if (this.versions.some((v) => v.id === r.id)) return;
-    const value = portable(r);
-    for (const image of value.entry.images) {
-      for (const part of [image, image.thumbnail].filter(Boolean)) {
-        if (part.storage !== 'appDataFolder' || part.appOwner !== `${this.id}:${r.entry.id}`)
-          throw new Error('사진을 앱 전용 저장소에 먼저 저장해야 합니다.');
+    for (const r of rs) {
+      if (this.purged.has(r.entry.id))
+        throw new Error('이 일기는 다른 기기에서 완전 삭제되었습니다.');
+      if (this.versions.some((v) => v.id === r.id)) continue;
+      const value = portable(r);
+      for (const image of value.entry.images) {
+        for (const part of [image, image.thumbnail].filter(Boolean)) {
+          if (part.storage !== 'appDataFolder' || part.appOwner !== `${this.id}:${r.entry.id}`)
+            throw new Error('사진을 앱 전용 저장소에 먼저 저장해야 합니다.');
+        }
       }
+      // Immutable revisions preserve simultaneous/offline edits, without a read/write lock.
+      if (r.baseRevision && !value.parents.includes(r.baseRevision))
+        value.parents.push(r.baseRevision);
+      if (!value.parents.length) {
+        const prior = this.index.find((v) => v.entry.id === r.entry.id);
+        if (prior && r.remoteKnown) value.parents.push(prior.id);
+      }
+      const id = await this.io.write(this.id, 'revision', value.id, jsonBlob(value));
+      this.files.push({
+        id,
+        appProperties: { format: FORMAT, namespace: this.id, kind: 'revision', key: value.id },
+      });
+      this.cache.set(id, value);
+      await this.cacheStore?.put(id, value).catch(() => {});
+      this.versions.push(value);
+      this.rebuildIndex();
     }
-    // Immutable revisions preserve simultaneous/offline edits, without a read/write lock.
-    if (r.baseRevision && !value.parents.includes(r.baseRevision))
-      value.parents.push(r.baseRevision);
-    if (!value.parents.length) {
-      const prior = this.index.find((v) => v.entry.id === r.entry.id);
-      if (prior && r.remoteKnown) value.parents.push(prior.id);
-    }
-    await this.io.write(this.id, 'revision', value.id, jsonBlob(value));
-    await this.list();
-    if (this.purged.has(r.entry.id))
-      throw new Error(
-        '저장 중 다른 기기에서 일기가 완전 삭제되었습니다. 기기 수정본은 보존했습니다.',
-      );
   }
   async resolve(revision, copy) {
-    await this.save(copy);
     const resolved = makeRevision(revision.conflict.entry, [revision.id, revision.conflict.id]);
-    await this.save(resolved);
+    await this.saveMany([copy, resolved]);
     return { ...resolved, sheetSaved: true, remoteKnown: true };
   }
   async saveRetention(days) {
@@ -229,7 +242,7 @@ export class AppDataRepository {
     this.retentionDays = days;
   }
   async purge(days) {
-    await this.list();
+    await this.list({ maxAge: 15000 });
     const ids = this.index
       .filter((r) => !r.conflict && expired(r.entry, days))
       .map((r) => r.entry.id);

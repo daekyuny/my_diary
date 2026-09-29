@@ -1,4 +1,5 @@
 import { expect } from '@playwright/test';
+import { createHash } from 'node:crypto';
 const scope = 'https://www.googleapis.com/auth/drive.appdata';
 export async function mock(context, state) {
   await context.addInitScript((scope) => {
@@ -60,7 +61,7 @@ export async function mock(context, state) {
       const bytes = Buffer.from(parts[2].slice(parts[2].indexOf('\r\n\r\n') + 4, -2), 'binary');
       const id = `private-${++state.next}`;
       state.files.set(id, { ...metadata, id, createdTime: new Date().toISOString(), bytes });
-      return send({ id });
+      return send({ id, sha256Checksum: createHash('sha256').update(bytes).digest('hex') });
     }
     if (url.pathname.startsWith('/drive/v3/files/')) {
       const id = url.pathname.split('/').at(-1);

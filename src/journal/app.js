@@ -75,6 +75,7 @@ let account = settings.account || null,
   updateApplying = false,
   closeRequested = false,
   savedContent = null,
+  connecting = false,
   ready = false;
 let draftWrite = Promise.resolve(),
   saveTimer,
@@ -90,7 +91,7 @@ let draftWrite = Promise.resolve(),
 let view = ['list', 'board', 'calendar'].includes(settings.view) ? settings.view : 'list';
 const owner = () => ownerKey(account, settings);
 const persistSettings = () => saveSettings(settings);
-const working = () => busy || syncing;
+const working = () => busy || syncing || connecting;
 function locks(value) {
   $('#editor-form')
     .querySelectorAll('input,textarea,select,button')
@@ -266,9 +267,9 @@ async function load() {
 }
 const cloud = () => (repository && google.connected() ? repository : null);
 const hydrate = (revision) => hydrateRevision(cloud(), revision);
-async function refresh() {
+async function refresh(options = {}) {
   if (!cloud() || !navigator.onLine) return;
-  await pullRemote(repository);
+  await pullRemote(repository, options);
   await load();
   lastRefresh = Date.now();
   if (entry && !dirty && !editing) {
@@ -339,7 +340,8 @@ function syncCloud() {
       }
       await load();
     } while (syncAgain || (await pendingRevisions()).length);
-    if (!entry && !busy) await refresh();
+    // Other devices are polled anyway; reuse the listing taken while pushing this batch.
+    if (!entry && !busy) await refresh({ maxAge: 15000 });
     syncImages = [];
     await cleanLocalPhotos(entry?.images || []);
     const conflicts = await conflictedRevisions();
@@ -530,6 +532,8 @@ async function selectRepository(id, closeSettings = true) {
   }
   await save();
   await purgeTrash(false);
+  // Pull the other devices' records now, reusing the listing fetched a moment ago.
+  await refresh({ maxAge: 15000 });
   $('#cloud-error').hidden = true;
   $('#repository-options').hidden = true;
   if (closeSettings) $('#settings-dialog').close();
@@ -1059,25 +1063,37 @@ async function start() {
   locks(false);
   connection();
   updates.start();
-  if (account)
-    task(async () => {
-      if (await google.restoreSession()) {
-        if (!google.hasAppData()) {
-          repository = null;
-          toast('앱 전용 저장소 권한이 필요합니다. Google에 다시 연결해주세요.');
-          connection();
-          return;
-        }
-        const identity = await google.identity();
-        if (identity.permissionId !== account.permissionId)
-          throw new Error('Google 계정이 달라 다시 연결해야 합니다.');
-        const files = await findRepositories();
-        const file =
-          files.find((f) => f.id === settings.sheets?.[account.permissionId]) ||
-          (files.length === 1 ? files[0] : null);
-        if (file) await selectRepository(file.id, false);
+  if (account) reconnect();
+}
+// Reconnect without locking the editor: local records are already on screen, and the
+// repository stays the same, so writing can start before the cloud round trips finish.
+async function reconnect() {
+  connecting = true;
+  connection();
+  try {
+    if (await google.restoreSession()) {
+      if (!google.hasAppData()) {
+        repository = null;
+        toast('앱 전용 저장소 권한이 필요합니다. Google에 다시 연결해주세요.');
+        return;
       }
-    });
+      const identity = await google.identity();
+      if (identity.permissionId !== account.permissionId)
+        throw new Error('Google 계정이 달라 다시 연결해야 합니다.');
+      const files = await findRepositories();
+      const file =
+        files.find((f) => f.id === settings.sheets?.[account.permissionId]) ||
+        (files.length === 1 ? files[0] : null);
+      if (file) await selectRepository(file.id, false);
+    }
+  } catch (error) {
+    $('#cloud-error').textContent = error.message || '연결을 완료하지 못했습니다.';
+    $('#cloud-error').hidden = false;
+    toast(error.message || '연결을 완료하지 못했습니다.', true);
+  } finally {
+    connecting = false;
+    connection();
+  }
 }
 start().catch((error) => toast(`일기장을 열지 못했습니다: ${error.message}`, true));
 
@@ -1111,7 +1127,7 @@ async function purgeTrash(ask = true) {
   await removeEntries(ids);
   await cleanLocalPhotos(syncImages);
   await load();
-  if (repository) await refresh();
+  if (repository && ids.length) await refresh();
   if (ask) toast(`${ids.length}개 일기를 완전 삭제했습니다.`);
 }
 $('#save-retention').onclick = () =>

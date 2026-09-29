@@ -8,8 +8,8 @@ export async function hydrateRevision(repository, revision) {
   return full;
 }
 // Merge the repository listing into the device store without overwriting pending local edits.
-export async function pullRemote(repository) {
-  const remote = await repository.list();
+export async function pullRemote(repository, options = {}) {
+  const remote = await repository.list(options);
   const local = new Map((await store.all('revisions')).map((r) => [r.id, r]));
   const current = new Set(remote.map((r) => r.id));
   for (const r of local.values())

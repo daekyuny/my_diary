@@ -111,6 +111,39 @@ test('cold loading bounds parallel reads and survives unavailable local cache', 
   assert.equal((await repo.list()).length, 20);
   assert.ok(peak > 1 && peak <= 6);
 });
+test('saving a batch lists once and extends the index without another listing', async () => {
+  const first = makeRevision(newEntry());
+  const { repo, io } = await setup([first]);
+  const cached = new Map();
+  const cacheStore = {
+    async load() {
+      return [];
+    },
+    async put(id, revision) {
+      cached.set(id, revision);
+    },
+    async prune() {},
+  };
+  const counting = new AppDataRepository('sheet', io, { cacheStore });
+  let lists = 0;
+  const list = io.list.bind(io);
+  io.list = async (...args) => {
+    lists++;
+    return list(...args);
+  };
+  await counting.list();
+  lists = 0;
+  const a = makeRevision({ ...first.entry, body: 'A' }, [first.id]);
+  const b = makeRevision(newEntry());
+  await counting.saveMany([a, b]);
+  assert.equal(lists, 1);
+  assert.deepEqual(new Set(counting.index.map((r) => r.id)), new Set([a.id, b.id]));
+  assert.equal([...cached.values()].filter((r) => [a.id, b.id].includes(r.id)).length, 2);
+  assert.equal((await repo.list()).length, 2);
+  lists = 0;
+  await counting.purge(30);
+  assert.equal(lists, 0);
+});
 test('concurrent devices preserve both edits and resolving keeps a separate copy', async () => {
   const first = makeRevision(newEntry());
   const { repo: a, io } = await setup([first]);

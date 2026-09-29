@@ -23,6 +23,10 @@ test('reload reuses private JSON cache and sync icon animates until connection c
     });
     await page.reload();
     await expect(page.locator('#sync')).toHaveAttribute('aria-busy', 'true');
+    // Reconnecting must not lock writing: the device copy is already on screen.
+    await expect(page.locator('#connection')).toHaveText('저장·연결 중…');
+    await expect(page.locator('#quick-entry')).toBeEnabled();
+    await expect(page.locator('#bottom-new')).toBeEnabled();
     await expect(page.locator('#sync svg')).toHaveCSS('animation-name', 'diary-sync-spin');
     release();
     await expect(page.locator('#connection')).toHaveText('클라우드 연결됨');
