@@ -260,7 +260,6 @@ function authorizeCode(calendar) {
             .then((result) => {
               if (!finished) {
                 accept(result);
-                folderId = '';
                 finish();
               }
             })
