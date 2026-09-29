@@ -86,6 +86,42 @@ test('pin and archive remain editable and body HTML never executes', async ({ pa
   expect(await page.evaluate(() => window.hacked)).toBeUndefined();
 });
 
+test('reading mode moves a diary to the trash with an undo toast and cards have no delete button', async ({
+  page,
+}) => {
+  page.on('dialog', (dialog) => {
+    throw new Error(`unexpected browser dialog: ${dialog.message()}`);
+  });
+  await newEntry(page);
+  await page.locator('#entry-title').fill('지울 기록');
+  await saveClose(page);
+  await expect(page.locator('.record')).toHaveCount(1);
+  await expect(page.locator('[data-delete-entry], .record-delete')).toHaveCount(0);
+  await page.locator('.record').click();
+  await expect(page.locator('#entry-reading')).toBeVisible();
+  await expect(page.locator('#archive-entry')).toBeVisible();
+  await expect(page.locator('#archive-entry')).toHaveText(/삭제하기/);
+  await page.locator('#archive-entry').click();
+  await expect(page.locator('#editor-dialog')).not.toBeVisible();
+  await expect(page.locator('.record')).toHaveCount(0);
+  await expect(page.locator('#toast')).toContainText('휴지통으로 이동했습니다');
+  await page.locator('#toast .toast-action').click();
+  await expect(page.locator('#toast')).toContainText('복원했습니다');
+  await expect(page.locator('.record')).toHaveCount(1);
+  await page.locator('.record').click();
+  await page.locator('#archive-entry').click();
+  await expect(page.locator('.record')).toHaveCount(0);
+  await page.locator('[data-collection=archive]:visible').click();
+  await expect(page.locator('.record')).toHaveCount(1);
+  await page.locator('.record').click();
+  await expect(page.locator('#archive-entry')).toHaveText(/복원하기/);
+  await page.locator('#archive-entry').click();
+  await expect(page.locator('#editor-dialog')).not.toBeVisible();
+  await expect(page.locator('.record')).toHaveCount(0);
+  await page.locator('[data-collection=journal]:visible').click();
+  await expect(page.locator('.record')).toHaveCount(1);
+});
+
 test('today prompt shows only until today has a diary and trash purge asks in-app', async ({
   page,
 }) => {
@@ -158,6 +194,13 @@ test('journal design captures populated list, cards, calendar and editor', async
   });
   await page.reload();
   await expect(page.locator('.record')).toHaveCount(4);
+  // The first record must be fully visible on the first screen, above the bottom nav, even
+  // with the connect banner and the today prompt both showing.
+  await expect(page.locator('#connect-banner')).toBeVisible();
+  await expect(page.locator('#quick-entry')).toBeVisible();
+  const first = await page.locator('.record').first().boundingBox();
+  const nav = await page.locator('.bottom-nav').boundingBox();
+  expect(first.y + first.height).toBeLessThanOrEqual(nav?.y ?? page.viewportSize().height);
   await page.screenshot({
     path: `artifacts/journal-list-${info.project.name}.png`,
     fullPage: true,

@@ -14,6 +14,7 @@ import {
   eventTime,
   repositoryOptionsHTML,
   quickEntryVisible,
+  cards,
 } from '../src/journal/views.js';
 import { batches } from '../src/journal/cloud-sync.js';
 import { nextRevision } from '../src/journal/current.js';
@@ -64,7 +65,7 @@ test('save state label reflects dirty edits, conflicts, cloud and device saves',
   assert.equal(characterCount('a'.repeat(1234)), '1,234자');
 });
 
-test('today prompt hides once today has a diary and in other collections', () => {
+test('today prompt hides once today has a diary, in other collections, and cards carry no delete button', () => {
   const group = (date, archived = false) => ({
     latest: { entry: { ...newEntry(date), archived }, sheetSaved: true },
     heads: [],
@@ -82,6 +83,9 @@ test('today prompt hides once today has a diary and in other collections', () =>
     quickEntryVisible([group(today)], { ...base, view: 'calendar', day: '2026-09-01' }),
     true,
   );
+  const html = cards([group(today)], 'list');
+  assert.match(html, /class="record"/);
+  assert.doesNotMatch(html, /data-delete-entry|record-delete/);
 });
 
 test('editor HTML escapes user content and hides events when the template is off', () => {

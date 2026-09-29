@@ -169,9 +169,7 @@ function connection() {
     ? `${account.emailAddress} · ${online ? 'Google 연결됨' : '재연결 필요'}`
     : '연결 전 기록은 이 기기에만 저장됩니다.';
   $('#save').disabled = busy || !dirty;
-  document
-    .querySelectorAll('.record, [data-delete-entry]')
-    .forEach((button) => (button.disabled = busy));
+  document.querySelectorAll('.record').forEach((button) => (button.disabled = busy));
   $('#disconnect').hidden = !account;
   for (const id of [
     'disconnect',
@@ -698,11 +696,6 @@ $('#entry-date').onchange = (e) => {
 $('#new-entry').onclick = $('#bottom-new').onclick = () => task(() => openEntry(null, localDate()));
 $('#quick-entry').onclick = () => task(() => openEntry());
 $('#records').onclick = (e) => {
-  const remove = e.target.closest('[data-delete-entry]');
-  if (remove) {
-    task(() => deleteEntry(remove.dataset.deleteEntry));
-    return;
-  }
   const button = e.target.closest('[data-entry]');
   if (button) task(() => openEntry(button.dataset.entry));
   if (e.target.closest('#empty-new')) task(() => openEntry());
@@ -734,6 +727,16 @@ $('#pin-entry').onclick = () => {
   fillEditor();
 };
 $('#archive-entry').onclick = () => {
+  if (!editing) {
+    // Reading mode acts at once: the entry is closed, moved, and offered an undo toast.
+    const id = entry.id;
+    task(async () => {
+      await closeEditor();
+      await deleteEntry(id);
+      return true;
+    }).then((moved) => moved && syncInBackground());
+    return;
+  }
   entry.deletedAt = entry.deletedAt ? '' : new Date().toISOString();
   entry.archived = Boolean(entry.deletedAt);
   changed();

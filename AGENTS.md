@@ -10,7 +10,7 @@
   - `appdata.js`: Google Drive `appDataFolder` 저장소. 2026-09 시트 이전 때 만든 `seed` 파일도 여기서 읽습니다.
   - `remote.js`, `cloud-sync.js`: 저장소 목록을 기기와 병합(pull), 대기 수정본을 묶어 전송(push)
   - `local.js`, `settings.js`, `transfer.js`: IndexedDB 조회·초안 복구·스토어 간 복사, localStorage 설정, ZIP 가져오기·내보내기
-  - `views.js`, `labels.js`, `icons.js`, `dom.js`, `photo-viewer.js`: HTML 템플릿, 상태 문구, 아이콘, `$`·toast·download, 사진 뷰어
+  - `views.js`, `labels.js`, `icons.js`, `dom.js`, `photo-viewer.js`: HTML 템플릿, 상태 문구, 아이콘, `$`·toast·확인 대화상자·download, 사진 뷰어
   - `photos.js`, `backup.js`, `calendar.js`, `updates.js`, `revision-cache.js`, `current.js`: 사진, ZIP 인코딩, Calendar 조회, 앱 업데이트, 수정본 캐시, 수정본 그룹화·연결
   - 순수 함수(`views.js`, `labels.js`, `current.js`, `cloud-sync.js`의 `batches`)는 `tests/journal-modules.test.mjs`에서 검증합니다.
 - `src/*.js`: 공통 기반. `model.js`(수정본 스키마·검증), `storage.js`(IndexedDB), `google.js`(OAuth·Drive·Calendar 요청), `body-links.js`
