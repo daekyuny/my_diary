@@ -1,8 +1,3 @@
-import { createSheetsQuota } from './sheets-quota.js';
-const sheetsQuota = createSheetsQuota({
-  notify: (delay) =>
-    globalThis.dispatchEvent?.(new CustomEvent('sheets-quota-wait', { detail: { delay } })),
-});
 import { parseRevision, revisionFile, imageFileName, calendarEvent } from './model.js';
 
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
@@ -144,14 +139,11 @@ export function authorize(calendar = false) {
   });
 }
 
-export async function request(path, options = {}, retried = false, quotaAttempt = 0) {
-  if (path.startsWith('sheets/')) await sheetsQuota.reserve(options.method || 'GET');
+export async function request(path, options = {}, retried = false) {
   if (!connected()) await restoreSession();
   if (!connected())
     throw new Error('Google 연결이 필요합니다. 저장한 기록은 기기에 남아 있습니다.');
-  const url = path.startsWith('sheets/')
-    ? `https://sheets.googleapis.com/${path.slice(7)}`
-    : `https://www.googleapis.com/${path}`;
+  const url = `https://www.googleapis.com/${path}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
   let response;
@@ -173,8 +165,6 @@ export async function request(path, options = {}, retried = false, quotaAttempt 
     clearTimeout(timer);
   }
 
-  if (path.startsWith('sheets/') && (await sheetsQuota.retry(response, quotaAttempt)))
-    return request(path, options, retried, quotaAttempt + 1);
   if (!response.ok) {
     if (response.status === 401 && authServer && !retried) {
       token = '';

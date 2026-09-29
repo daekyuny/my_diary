@@ -1,7 +1,6 @@
 import * as google from '../google.js';
 import { validateRevision, entryGroups, makeRevision } from '../model.js';
 import { expired } from './current.js';
-import { SheetsRepository, findSheets } from './sheets.js';
 
 const FORMAT = 'my-diary-private-v1';
 const jsonBlob = (value) => new Blob([JSON.stringify(value)], { type: 'application/json' });
@@ -264,101 +263,13 @@ export class AppDataRepository {
   }
 }
 
-// A read-only snapshot: never initialize, compact, or otherwise change the source sheet.
-export async function sheetSnapshot(id) {
-  const source = new SheetsRepository(id);
-  const meta = await (
-    await google.request(`sheets/v4/spreadsheets/${id}?fields=sheets.properties`)
-  ).json();
-  const titles = new Set(meta.sheets.map((s) => s.properties.title));
-  if (['일기', '설정', '일정'].some((title) => !titles.has(title)))
-    throw new Error('기존 시트의 필수 탭이 없습니다. 원본을 확인한 후 다시 이전해주세요.');
-  const ranges = ["'설정'!A1:B", "'일기'!A2:O", "'휴지통'!A2:O", "'일정'!A2:C", "'추가항목'!A2:C"];
-  const present = ranges.filter((r) => titles.has(r.split("'")[1]));
-  const data = await source.values(present);
-  const [settings, rows, trash, events, extraRows] = ranges.map(
-    (r) => data[present.indexOf(r)] || [],
-  );
-  if (!settings.some((r) => r[0] === 'format' && r[1] === 'my-diary-sheets-v1'))
-    throw new Error('My Diary 시트 형식이 아닙니다.');
-  const { decodeIndex } = await import('./sheets.js');
-  const result = [];
-  for (const row of [...rows, ...trash]) {
-    if (!row[0]) continue;
-    const base = decodeIndex([row])[0];
-    const extra = row[14]
-      ? JSON.parse(row[14])
-      : JSON.parse(extraRows.find((r) => r[0] === row[0] && r[1] === '@app')?.[2] || '{}');
-    const full = {
-      ...base,
-      entry: {
-        ...base.entry,
-        ...extra,
-        body: row
-          .slice(10, 14)
-          .map((v) => v || '')
-          .join(''),
-        events: extra.events || events.filter((e) => e[0] === row[0]).map((e) => JSON.parse(e[2])),
-      },
-    };
-    result.push(portable(full));
-  }
-  return {
-    revisions: entryGroups(result).map((g) => g.latest),
-    retentionDays: Number(settings.filter((r) => r[0] === 'trashDays').at(-1)?.[1] ?? 30),
-  };
-}
-export async function migrateRepository(
+// Open an existing appdata repository. Its root lists the seed files copied from the
+// former Sheets storage; those seeds stay readable so migrated diaries remain available.
+export async function openRepository(
   id,
-  { io = driveStore, snapshot = sheetSnapshot, progress = () => {}, cacheStore } = {},
+  { io = driveStore, progress = () => {}, cacheStore } = {},
 ) {
   const repository = new AppDataRepository(id, io, { cacheStore, progress });
-  const roots = await io.list(id, 'root');
-  if (roots.length) {
-    await repository.prepare(roots);
-    return repository;
-  }
-  const initial = await snapshot(id);
-  const snapshotHash = await digest(jsonBlob(initial));
-  const seeds = [];
-  const existing = await io.list(null, 'asset');
-  const assets = new Map(
-    existing.map((f) => [`${f.appProperties.namespace}:${f.appProperties.key}`, f.id]),
-  );
-  for (let i = 0; i < initial.revisions.length; i++) {
-    progress(`일기와 사진 이전 중 ${i + 1}/${initial.revisions.length}`);
-    const revision = portable(initial.revisions[i]);
-    for (const image of revision.entry.images) {
-      for (const part of [image, image.thumbnail].filter(Boolean)) {
-        if (!part.driveId) throw new Error(`이전할 사진 파일 정보가 없습니다: ${part.name}`);
-        const owner = `${id}:${revision.entry.id}`;
-        const original = await io.read(part.driveId);
-        const key = await digest(original);
-        let target = assets.get(`${owner}:${key}`);
-        if (!target || (await digest(await io.read(target))) !== (await digest(original))) {
-          target = await io.write(owner, 'asset', key, original);
-          assets.set(`${owner}:${key}`, target);
-        }
-        part.driveId = target;
-        part.storage = 'appDataFolder';
-        part.appOwner = owner;
-      }
-    }
-    seeds.push({
-      id: await io.write(id, 'seed', revision.id, jsonBlob(revision)),
-      entryId: revision.entry.id,
-    });
-  }
-  if ((await digest(jsonBlob(await snapshot(id)))) !== snapshotHash)
-    throw new Error(
-      '이전 중 기존 시트가 변경되었습니다. 다른 기기 작업을 마친 뒤 다시 연결해주세요. 기존 데이터는 보존했습니다.',
-    );
-  await io.write(
-    id,
-    'root',
-    'ready',
-    jsonBlob({ format: FORMAT, seeds, retentionDays: initial.retentionDays, sourceSheet: id }),
-  );
   await repository.prepare();
   return repository;
 }
@@ -370,8 +281,6 @@ export async function findRepositories() {
       { id: f.appProperties.namespace, name: 'My Diary · 앱 전용 저장소' },
     ]),
   );
-  for (const file of await findSheets())
-    if (!byId.has(file.id)) byId.set(file.id, { ...file, name: `${file.name} · 이전할 기존 시트` });
   return [...byId.values()];
 }
 export async function createRepository() {

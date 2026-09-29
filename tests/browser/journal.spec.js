@@ -59,7 +59,7 @@ test('responsive journal writes separate same-day entries, searches and switches
 test('custom fields are removed from settings and the editor', async ({ page }) => {
   await settings(page);
   await expect(page.locator('#new-definition')).toHaveCount(0);
-  await expect(page.locator('#migration-status')).toBeVisible();
+  await expect(page.locator('#repository-details')).toBeVisible();
   await page.locator('#close-settings').click();
   await newEntry(page);
   await expect(page.locator('#add-field')).toHaveCount(0);

@@ -14,7 +14,6 @@ const SHELL = [
   '/src/model.js',
   '/src/storage.js',
   '/src/google.js',
-  '/src/sheets-quota.js',
   '/src/sync.js',
   '/src/weather.js',
   '/src/backup.js',

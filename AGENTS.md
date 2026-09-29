@@ -7,12 +7,11 @@
 프런트엔드는 빌드 도구 없는 ES modules + CSS이며 esbuild는 번들링에만 씁니다. 프레임워크와 런타임 의존성은 `fflate` 하나뿐입니다.
 
 - `index.html`, `src/journal/`: 현재 앱. `app.js`가 화면 상태와 이벤트를 쥔 컨트롤러이고 나머지는 역할별 모듈입니다.
-  - `appdata.js`: Google Drive `appDataFolder` 저장소(현재 백엔드)와 기존 Sheets → appdata 이전
-  - `sheets.js`, `sheet-lock.js`: 이전 전 Google Sheets 저장소. 새 기능을 여기에 넣지 않습니다.
+  - `appdata.js`: Google Drive `appDataFolder` 저장소. 2026-09 시트 이전 때 만든 `seed` 파일도 여기서 읽습니다.
   - `remote.js`, `cloud-sync.js`: 저장소 목록을 기기와 병합(pull), 대기 수정본을 묶어 전송(push)
   - `local.js`, `settings.js`, `transfer.js`: IndexedDB 조회·초안 복구·스토어 간 복사, localStorage 설정, ZIP 가져오기·내보내기
   - `views.js`, `labels.js`, `icons.js`, `dom.js`, `photo-viewer.js`: HTML 템플릿, 상태 문구, 아이콘, `$`·toast·download, 사진 뷰어
-  - `photos.js`, `backup.js`, `calendar.js`, `updates.js`, `revision-cache.js`, `cache.js`, `current.js`: 사진, ZIP 인코딩, Calendar 조회, 앱 업데이트, 로컬 캐시, 수정본 그룹화·연결
+  - `photos.js`, `backup.js`, `calendar.js`, `updates.js`, `revision-cache.js`, `current.js`: 사진, ZIP 인코딩, Calendar 조회, 앱 업데이트, 수정본 캐시, 수정본 그룹화·연결
   - 순수 함수(`views.js`, `labels.js`, `current.js`, `cloud-sync.js`의 `batches`)는 `tests/journal-modules.test.mjs`에서 검증합니다.
 - `src/*.js`: 두 앱이 공유하는 기반. `model.js`(수정본 스키마·검증), `storage.js`(IndexedDB), `google.js`(OAuth·Drive·Calendar 요청), `sync.js`, `body-links.js`
 - `legacy.html`, `src/app.js`, `src/weather.js`, `src/notifications.js`, `src/backup.js`, `src/styles.css`: 이전 세대 Drive 폴더 기반 앱. 유지만 하며 변경하지 않습니다.

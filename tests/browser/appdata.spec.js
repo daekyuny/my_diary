@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test';
 import { newEntry, makeRevision } from '../../src/model.js';
-import { mock, state, connect, device } from './appdata-helpers.js';
+import { mock, state, connect, device, seedRepository } from './appdata-helpers.js';
 test('reload reuses private JSON cache and sync icon animates until connection completes', async ({
   browser,
 }, testInfo) => {
   const data = state();
-  data.legacy = makeRevision({ ...newEntry(), title: '새로고침 캐시' });
+  seedRepository(data, makeRevision({ ...newEntry(), title: '새로고침 캐시' }));
   const context = await browser.newContext(device(testInfo));
   try {
     await mock(context, data);
@@ -73,26 +73,25 @@ test('private storage saves and restores on another device without visible Drive
     await b.close();
   }
 });
-test('existing Sheets migrate read-only and subsequent saves use private files', async ({
+test('migrated seeds stay readable and subsequent saves use private revision files', async ({
   browser,
 }, testInfo) => {
   const data = state();
-  data.legacy = makeRevision({ ...newEntry(), title: '이전할 일기', body: '원래 본문' });
+  const migrated = makeRevision({ ...newEntry(), title: '이전한 일기', body: '원래 본문' });
+  const seed = seedRepository(data, migrated);
+  const before = data.files.get(seed).bytes.toString();
   const context = await browser.newContext(device(testInfo));
   try {
     await mock(context, data);
     const page = await context.newPage();
     await connect(page, false);
-    await expect(page.locator('.record')).toContainText('이전할 일기');
+    await expect(page.locator('.record')).toContainText('이전한 일기');
     await page.locator('.record').click();
     await page.locator('#edit-entry').click();
     await page.locator('#entry-body').fill('이전 후 수정');
     await page.locator('#save').click();
     await expect(page.locator('#connection')).toHaveText('클라우드 연결됨');
-    expect(data.legacy.entry.body).toBe('원래 본문');
-    expect(data.calls.filter((c) => c.includes('/v4/')).every((c) => c.startsWith('GET'))).toBe(
-      true,
-    );
+    expect(data.files.get(seed).bytes.toString()).toBe(before);
     expect([...data.files.values()].some((f) => f.appProperties.kind === 'revision')).toBe(true);
   } finally {
     await context.close();

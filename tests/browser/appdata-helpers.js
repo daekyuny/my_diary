@@ -1,5 +1,4 @@
 import { expect } from '@playwright/test';
-import { encodeRevision } from '../../src/journal/sheets.js';
 const scope =
   'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata';
 export async function mock(context, state) {
@@ -24,7 +23,7 @@ export async function mock(context, state) {
     };
   }, scope);
   await context.route('https://accounts.google.com/**', (r) => r.abort());
-  await context.route(/^https:\/\/(www|sheets)\.googleapis\.com\//, async (route) => {
+  await context.route(/^https:\/\/www\.googleapis\.com\//, async (route) => {
     const request = route.request(),
       url = new URL(request.url());
     const send = (json) => route.fulfill({ json });
@@ -33,8 +32,7 @@ export async function mock(context, state) {
       return send({ user: { permissionId: 'owner', emailAddress: 'test@example.com' } });
     if (url.pathname === '/drive/v3/files') {
       expect(request.method()).toBe('GET');
-      if (url.searchParams.get('spaces') !== 'appDataFolder')
-        return send({ files: state.legacy ? [{ id: 'old-sheet', name: 'My Diary' }] : [] });
+      if (url.searchParams.get('spaces') !== 'appDataFolder') return send({ files: [] });
       const q = url.searchParams.get('q');
       const ns = /key='namespace' and value='([^']+)'/.exec(q)?.[1];
       const kind = /key='kind' and value='([^']+)'/.exec(q)?.[1];
@@ -78,35 +76,37 @@ export async function mock(context, state) {
         contentType: file.name.startsWith('asset') ? 'image/png' : 'application/json',
       });
     }
-    if (url.pathname === '/v4/spreadsheets/old-sheet') {
-      expect(request.method()).toBe('GET');
-      return send({
-        sheets: ['일기', '설정', '휴지통', '일정'].map((title) => ({ properties: { title } })),
-      });
-    }
-    if (url.pathname === '/v4/spreadsheets/old-sheet/values:batchGet') {
-      return send({
-        valueRanges: url.searchParams.getAll('ranges').map((r) => ({
-          values: r.startsWith("'설정'")
-            ? [
-                ['format', 'my-diary-sheets-v1'],
-                ['trashDays', '30'],
-              ]
-            : r.startsWith("'일기'")
-              ? [encodeRevision(state.legacy)[0][0]]
-              : [],
-        })),
-      });
-    }
     throw new Error(`Unexpected ${request.method()} ${url}`);
   });
 }
 export const state = () => ({ files: new Map(), next: 0, calls: [] });
+// Pre-populate a repository the way the former Sheets migration left it: seeds plus a root.
+export function seedRepository(state, revision, namespace = 'private-personal') {
+  const put = (kind, key, value) => {
+    const id = `private-${++state.next}`;
+    state.files.set(id, {
+      id,
+      name: `${kind}-${key}`,
+      parents: ['appDataFolder'],
+      appProperties: { format: 'my-diary-private-v1', namespace, kind, key },
+      createdTime: new Date().toISOString(),
+      bytes: Buffer.from(JSON.stringify(value)),
+    });
+    return id;
+  };
+  const seed = put('seed', revision.id, revision);
+  put('root', 'ready', {
+    format: 'my-diary-private-v1',
+    seeds: [{ id: seed, entryId: revision.entry.id }],
+    retentionDays: 30,
+  });
+  return seed;
+}
 export async function connect(page, fresh) {
   await page.goto('/');
   await expect(page.locator('#banner-connect')).toBeEnabled();
   await page.locator('#banner-connect').click();
-  if (fresh) await page.locator('#create-sheet').click();
+  if (fresh) await page.locator('#create-repository').click();
   await expect(page.locator('#connection')).toHaveText('클라우드 연결됨');
 }
 

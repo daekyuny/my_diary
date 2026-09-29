@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AppDataRepository, migrateRepository } from '../src/journal/appdata.js';
+import { AppDataRepository, openRepository } from '../src/journal/appdata.js';
 import { newEntry, makeRevision } from '../src/model.js';
 
 function memory() {
@@ -29,12 +29,31 @@ function memory() {
     },
   };
 }
-async function setup(revisions = []) {
+const json = (value) => new Blob([JSON.stringify(value)], { type: 'application/json' });
+// Mirror what the former Sheets migration wrote: one seed per diary plus a root listing them.
+async function setup(revisions = [], retentionDays = 30) {
   const io = memory();
-  const snapshot = async () => ({ revisions, retentionDays: 30 });
-  const repo = await migrateRepository('sheet', { io, snapshot });
-  return { io, repo, snapshot };
+  const seeds = [];
+  for (const r of revisions)
+    seeds.push({ id: await io.write('sheet', 'seed', r.id, json(r)), entryId: r.entry.id });
+  await io.write(
+    'sheet',
+    'root',
+    'ready',
+    json({ format: 'my-diary-private-v1', seeds, retentionDays }),
+  );
+  const repo = await openRepository('sheet', { io });
+  return { io, repo };
 }
+test('opening requires a root and migrated seeds load with their retention setting', async () => {
+  await assert.rejects(openRepository('sheet', { io: memory() }), /연결 또는 이전/);
+  const r = makeRevision({ ...newEntry(), body: '이전한 일기' });
+  const { repo } = await setup([r], 90);
+  const [saved] = await repo.list();
+  assert.equal(saved.entry.body, '이전한 일기');
+  assert.equal(saved.sheetSaved, true);
+  assert.equal(repo.retentionDays, 90);
+});
 test('reload reuses immutable JSON while discovering new revisions and purge markers', async () => {
   const first = makeRevision(newEntry());
   const { io } = await setup([first]);
@@ -91,63 +110,6 @@ test('cold loading bounds parallel reads and survives unavailable local cache', 
   });
   assert.equal((await repo.list()).length, 20);
   assert.ok(peak > 1 && peak <= 6);
-});
-test('migration preserves diary contents, metadata and source while copying original and thumbnail', async () => {
-  const io = memory();
-  const photo = await io.write('old', 'original', 'p', new Blob(['original']));
-  const thumb = await io.write('old', 'original', 't', new Blob(['thumbnail']));
-  const r = makeRevision({
-    ...newEntry(),
-    body: '일기',
-    images: [
-      {
-        id: 'photo',
-        name: 'p.jpg',
-        type: 'image/jpeg',
-        driveId: photo,
-        thumbnail: { id: 'photo-thumbnail', name: 't.jpg', type: 'image/jpeg', driveId: thumb },
-      },
-    ],
-  });
-  const snapshot = async () => ({ revisions: [r], retentionDays: 90 });
-  const repo = await migrateRepository('sheet', { io, snapshot });
-  const [saved] = await repo.list();
-  assert.equal(saved.entry.body, r.entry.body);
-  assert.equal(repo.retentionDays, 90);
-  assert.notEqual(saved.entry.images[0].driveId, photo);
-  assert.equal(await (await io.read(saved.entry.images[0].driveId)).text(), 'original');
-  assert.equal(saved.entry.images[0].appOwner, `sheet:${r.entry.id}`);
-  assert.equal(r.entry.images[0].driveId, photo);
-  assert.ok(io.files.has(photo));
-  const before = io.files.size;
-  await migrateRepository('sheet', {
-    io,
-    snapshot: () => {
-      throw new Error('must not reread source');
-    },
-  });
-  assert.equal(io.files.size, before);
-});
-test('changed source does not commit migration and a retry recovers', async () => {
-  const io = memory();
-  const r = makeRevision(newEntry());
-  let reads = 0;
-  await assert.rejects(
-    migrateRepository('sheet', {
-      io,
-      snapshot: async () => ({
-        revisions: [{ ...r, entry: { ...r.entry, body: String(++reads) } }],
-        retentionDays: 30,
-      }),
-    }),
-    /변경/,
-  );
-  assert.equal((await io.list('sheet', 'root')).length, 0);
-  const repo = await migrateRepository('sheet', {
-    io,
-    snapshot: async () => ({ revisions: [r], retentionDays: 30 }),
-  });
-  assert.equal((await repo.list()).length, 1);
 });
 test('concurrent devices preserve both edits and resolving keeps a separate copy', async () => {
   const first = makeRevision(newEntry());

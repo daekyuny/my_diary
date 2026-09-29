@@ -29,11 +29,7 @@ import {
   todayLabel,
   characterCount,
 } from './labels.js';
-import {
-  findRepositories as findSheets,
-  createRepository as createSheet,
-  migrateRepository,
-} from './appdata.js';
+import { findRepositories, createRepository, openRepository } from './appdata.js';
 import { newEntry, localDate, validDate, makeRevision, mergeEvents } from '../model.js';
 import { expired, nextRevision } from './current.js';
 import { $, toast, download } from './dom.js';
@@ -109,10 +105,8 @@ function locks(value) {
     'banner-connect',
     'settings-connect',
     'disconnect',
-    'select-sheet',
-    'find-sheets',
-    'create-sheet',
-    'repair-sheet',
+    'select-repository',
+    'create-repository',
     'import',
     'export',
     'move-local',
@@ -180,10 +174,8 @@ function connection() {
   $('#disconnect').hidden = !account;
   for (const id of [
     'disconnect',
-    'select-sheet',
-    'find-sheets',
-    'create-sheet',
-    'repair-sheet',
+    'select-repository',
+    'create-repository',
     'import',
     'export',
     'move-local',
@@ -193,22 +185,14 @@ function connection() {
   for (const id of ['connect', 'banner-connect', 'settings-connect']) {
     $('#' + id).disabled = working() || (online && google.hasAppData());
   }
-  $('#sheet-options').hidden = false;
-  $('#sheet-select').parentElement.hidden = !$('#sheet-select').options.length;
-  $('#select-sheet').hidden = !$('#sheet-select').options.length;
-  $('#repair-sheet').hidden = !$('#sheet-select').options.length;
-  $('#open-sheet').hidden = true;
-  $('#create-sheet').hidden = Boolean(repository) || Boolean($('#sheet-select').options.length);
-  $('#sheet-help').textContent = repository
-    ? '일기와 사진은 앱 전용 공간에 저장됩니다. 기존 시트와 사진은 이전 전 사본으로 남습니다.'
-    : 'Google 연결 후 기존 일기를 이전하거나 새 앱 전용 저장소를 만듭니다.';
-  $('#migration-status').textContent = repository
-    ? '앱 전용 저장소 사용 중 · 다른 기기에서도 최신 앱으로 연결해주세요.'
-    : '복사와 검증을 완료한 후 앱 전용 저장소로 전환합니다.';
+  $('#create-repository').hidden = Boolean(repository) || !$('#repository-options').hidden;
+  $('#repository-help').textContent = repository
+    ? '일기와 사진은 Drive의 앱 전용 공간에 저장됩니다. 같은 계정의 다른 기기에서도 최신 앱으로 연결해주세요.'
+    : 'Google 연결 후 앱 전용 저장소를 만들거나 기존 저장소에 연결합니다.';
   if (!$('#settings-dialog').open)
     $('#trash-days').value = String(repository?.retentionDays ?? settings.trashDays ?? 30);
   $('#move-local').hidden = !account || !repository;
-  $('#sheet-details').textContent = repositoryDetails(repository, pending, online);
+  $('#repository-details').textContent = repositoryDetails(repository, pending, online);
   if (entry)
     $('#save-state').textContent = saveStateLabel({
       dirty,
@@ -285,7 +269,7 @@ const cloud = () => (repository && google.connected() ? repository : null);
 const hydrate = (revision) => hydrateRevision(cloud(), revision);
 async function refresh() {
   if (!cloud() || !navigator.onLine) return;
-  await pullRemote(repository, { activeEntryId: entry?.id });
+  await pullRemote(repository);
   await load();
   lastRefresh = Date.now();
   if (entry && !dirty && !editing) {
@@ -522,7 +506,7 @@ function openSettings() {
   $('#settings-dialog').showModal();
 }
 async function selectRepository(id, closeSettings = true) {
-  const candidate = await migrateRepository(id, {
+  const candidate = await openRepository(id, {
     cacheStore: revisionCache(JSON.stringify([settings.googleClientId, account.permissionId, id])),
     progress: (message) => {
       syncProgress = message;
@@ -534,7 +518,6 @@ async function selectRepository(id, closeSettings = true) {
   const previousOwner = owner();
   const unattached = previousOwner.endsWith('-unassigned') ? await snapshotStore() : null;
   repository = candidate;
-  if (settings.sheetFolders?.[id]) google.useFolder(settings.sheetFolders[id]);
   settings.sheets ||= {};
   settings.sheets[account.permissionId] = id;
   persistSettings();
@@ -549,11 +532,11 @@ async function selectRepository(id, closeSettings = true) {
   await save();
   await purgeTrash(false);
   $('#cloud-error').hidden = true;
-  $('#sheet-options').hidden = true;
+  $('#repository-options').hidden = true;
   if (closeSettings) $('#settings-dialog').close();
   toast('같은 Google 계정의 기기에서 앱 전용 저장소를 함께 사용합니다.');
 }
-function connect(calendar = false, choose = false) {
+function connect(calendar = false) {
   if (!ready || busy) return;
   settings.googleClientId = $('#settings-dialog').open
     ? $('#setting-client').value.trim()
@@ -588,23 +571,15 @@ function connect(calendar = false, choose = false) {
       settings.account = identity;
       persistSettings();
     }
-    const files = await findSheets();
-    for (const file of files) {
-      if (file.parents?.[0]) {
-        settings.sheetFolders ||= {};
-        settings.sheetFolders[file.id] = file.parents[0];
-      }
-    }
+    const files = await findRepositories();
     const preferred = files.find((file) => file.id === settings.sheets?.[account.permissionId]);
     const showFiles = () => {
       openSettings();
-      $('#sheet-options').hidden = false;
-      $('#sheet-select').innerHTML = repositoryOptionsHTML(files);
-      $('#select-sheet').hidden = !files.length;
-      $('#repair-sheet').hidden = !files.length;
-      $('#create-sheet').hidden = Boolean(files.length);
+      $('#repository-options').hidden = !files.length;
+      $('#repository-select').innerHTML = repositoryOptionsHTML(files);
+      $('#create-repository').hidden = Boolean(files.length);
     };
-    if (!choose && (preferred || files.length === 1)) {
+    if (preferred || files.length === 1) {
       try {
         await selectRepository((preferred || files[0]).id);
       } catch (error) {
@@ -615,7 +590,7 @@ function connect(calendar = false, choose = false) {
       showFiles();
       toast(
         files.length
-          ? '이전하거나 연결할 일기 저장소를 선택해주세요.'
+          ? '연결할 일기 저장소를 선택해주세요.'
           : '새 앱 전용 저장소를 만들 준비가 됐습니다.',
       );
     }
@@ -658,7 +633,7 @@ async function searchBodies() {
     return;
   }
   $('#search-state').textContent = '선택한 날짜 범위의 본문을 검색하고 있어요…';
-  // Sequential requests avoid a burst across the per-user Sheets quota.
+  // Sequential requests keep the Drive API usage steady.
   for (const revision of missing.filter(
     (r) =>
       (!bounds.from || r.entry.date >= bounds.from) &&
@@ -928,21 +903,14 @@ $('#sync').onclick = () => {
       toast('최신 기록을 불러왔습니다.');
     });
 };
-$('#find-sheets').onclick = () => connect(false, true);
-$('#create-sheet').onclick = () => {
+$('#create-repository').onclick = () => {
   if (!google.connected() || !google.hasAppData()) return connect();
   task(async () => {
-    const created = await createSheet();
+    const created = await createRepository();
     await selectRepository(created.id);
   });
 };
-$('#select-sheet').onclick = () => task(() => selectRepository($('#sheet-select').value));
-$('#repair-sheet').onclick = () =>
-  task(async () => {
-    const id = $('#sheet-select').value;
-    // Retrying migration preserves the source and resumes verified attachments.
-    await selectRepository(id);
-  });
+$('#select-repository').onclick = () => task(() => selectRepository($('#repository-select').value));
 $('#disconnect').onclick = () =>
   task(async () => {
     await save(false);
@@ -956,8 +924,8 @@ $('#disconnect').onclick = () =>
     await store.openStore(owner());
     await recoverDrafts();
     await load();
-    $('#sheet-options').hidden = true;
-    $('#sheet-select').innerHTML = '';
+    $('#repository-options').hidden = true;
+    $('#repository-select').innerHTML = '';
   });
 $('#import').onclick = () => $('#import-input').click();
 $('#import-input').onchange = () =>
@@ -976,18 +944,11 @@ $('#import-input').onchange = () =>
         toast(`남은 기록은 기기에 저장되어 있습니다. ${error.message}`, true),
       );
   });
-window.addEventListener('sheets-quota-wait', (event) => {
-  syncProgress = `Google 요청 한도로 ${Math.ceil(event.detail.delay / 1000)}초 후 자동 재시도합니다.`;
-  connection();
-  toast(
-    `Google 요청 한도로 ${Math.ceil(event.detail.delay / 1000)}초 후 자동으로 계속합니다. 남은 기록은 기기에 보관됩니다.`,
-  );
-});
 $('#export').onclick = () =>
   task(async () => {
     await save();
     if (cloud()) await refresh();
-    const archive = await exportArchive({ repository: cloud()?.private ? cloud() : null, hydrate });
+    const archive = await exportArchive({ repository: cloud(), hydrate });
     download(archive.blob, archive.name);
     toast('일기와 사진 원본을 ZIP으로 내보냈습니다.');
   });
@@ -1111,17 +1072,11 @@ async function start() {
         const identity = await google.identity();
         if (identity.permissionId !== account.permissionId)
           throw new Error('Google 계정이 달라 다시 연결해야 합니다.');
-        const files = await findSheets();
+        const files = await findRepositories();
         const file =
           files.find((f) => f.id === settings.sheets?.[account.permissionId]) ||
           (files.length === 1 ? files[0] : null);
-        if (file) {
-          if (file.parents?.[0]) {
-            settings.sheetFolders ||= {};
-            settings.sheetFolders[file.id] = file.parents[0];
-          }
-          await selectRepository(file.id, false);
-        }
+        if (file) await selectRepository(file.id, false);
       }
     });
 }
