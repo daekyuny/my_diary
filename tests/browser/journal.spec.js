@@ -86,7 +86,9 @@ test('pin and archive remain editable and body HTML never executes', async ({ pa
   expect(await page.evaluate(() => window.hacked)).toBeUndefined();
 });
 
-test('today prompt shows only until today has a diary', async ({ page }) => {
+test('today prompt shows only until today has a diary and trash purge asks in-app', async ({
+  page,
+}) => {
   page.on('dialog', (dialog) => {
     throw new Error(`unexpected browser dialog: ${dialog.message()}`);
   });
@@ -105,6 +107,14 @@ test('today prompt shows only until today has a diary', async ({ page }) => {
   await page.locator('[data-day="2026-08-07"]').click();
   await expect(page.locator('#quick-entry')).toBeVisible();
   await expect(page.locator('#quick-label')).toHaveText('2026-08-07에 새 기록 남기기');
+  await settings(page);
+  await page.locator('#purge-trash').click();
+  await expect(page.locator('#confirm-message')).toContainText('완전 삭제할까요');
+  await page.locator('#confirm-cancel').click();
+  await expect(page.locator('#small-dialog')).not.toBeVisible();
+  await page.locator('#purge-trash').click();
+  await page.locator('#confirm-accept').click();
+  await expect(page.locator('#toast')).toContainText('완전 삭제했습니다');
 });
 
 test('journal design captures populated list, cards, calendar and editor', async ({
@@ -188,14 +198,19 @@ test('manual save stays disabled until changed and closing unsaved edits asks fo
   await page.locator('#entry-body').fill('저장하지 않을 변경');
   await page.waitForTimeout(1600);
   await expect(page.locator('#save')).toBeEnabled();
-  page.once('dialog', (dialog) => {
-    expect(dialog.message()).toContain('저장하지 않은');
-    return dialog.dismiss();
+  // The confirmation is an in-app dialog, never a browser confirm().
+  page.on('dialog', (dialog) => {
+    throw new Error(`unexpected browser dialog: ${dialog.message()}`);
   });
   await page.locator('#close-editor').click();
+  await expect(page.locator('#small-dialog')).toBeVisible();
+  await expect(page.locator('#confirm-message')).toContainText('저장하지 않은');
+  await page.locator('#confirm-cancel').click();
+  await expect(page.locator('#small-dialog')).not.toBeVisible();
   await expect(page.locator('#editor-dialog')).toBeVisible();
-  page.once('dialog', (dialog) => dialog.accept());
   await page.locator('#close-editor').click();
+  await page.locator('#confirm-accept').click();
+  await expect(page.locator('#editor-dialog')).not.toBeVisible();
   await page.locator('.record').click();
   await page.locator('#edit-entry').click();
   await expect(page.locator('#entry-body')).toHaveValue('');

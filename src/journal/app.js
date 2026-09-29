@@ -33,7 +33,7 @@ import {
 import { findRepositories, createRepository, openRepository } from './appdata.js';
 import { newEntry, localDate, validDate, makeRevision, mergeEvents } from '../model.js';
 import { expired, nextRevision } from './current.js';
-import { $, toast, download } from './dom.js';
+import { $, toast, small, confirmDialog, download } from './dom.js';
 import { loadSettings, saveSettings, ownerKey } from './settings.js';
 import {
   loadGroups,
@@ -498,7 +498,14 @@ async function renderPhotos() {
   }
 }
 async function closeEditor() {
-  if (dirty && !window.confirm('저장하지 않은 변경 내용이 있습니다. 저장하지 않고 닫을까요?'))
+  if (
+    dirty &&
+    !(await confirmDialog(
+      '저장하지 않은 변경',
+      '저장하지 않은 변경 내용이 있습니다. 저장하지 않고 닫을까요?',
+      { accept: '저장하지 않고 닫기', danger: true },
+    ))
+  )
     return;
   if (entry) await store.remove('drafts', entry.id);
   dirty = false;
@@ -509,11 +516,6 @@ async function closeEditor() {
   urls.forEach(URL.revokeObjectURL);
   urls = [];
   await cleanLocalPhotos(syncImages);
-}
-function small(title, html) {
-  $('#small-title').textContent = title;
-  $('#small-body').innerHTML = html;
-  if (!$('#small-dialog').open) $('#small-dialog').showModal();
 }
 function openSettings() {
   $('#setting-client').value = settings.googleClientId || '';
@@ -1120,6 +1122,10 @@ async function reconnect() {
 }
 start().catch((error) => toast(`일기장을 열지 못했습니다: ${error.message}`, true));
 
+const syncInBackground = () =>
+  resumeConnection().catch((error) => toast(`기기에 저장되어 있습니다. ${error.message}`, true));
+// Moves a diary to the trash (or back) on the device; the cloud push runs afterwards so the
+// undo toast stays usable while it is in flight.
 async function deleteEntry(id) {
   const group = groups.find((g) => g.latest.entry.id === id);
   if (!group) return;
@@ -1132,14 +1138,27 @@ async function deleteEntry(id) {
     remoteKnown: Boolean(r.sheetSaved || r.remoteKnown),
   });
   await load();
-  await save();
-  toast(e.deletedAt ? '휴지통으로 이동했습니다.' : '일기를 복원했습니다.');
+  connection();
+  if (e.deletedAt)
+    toast('휴지통으로 이동했습니다.', false, {
+      label: '되돌리기',
+      run: () =>
+        task(async () => {
+          await deleteEntry(id);
+          return true;
+        }).then((restored) => restored && syncInBackground()),
+    });
+  else toast('일기를 복원했습니다.');
 }
 async function purgeTrash(ask = true) {
   const days = repository?.retentionDays ?? settings.trashDays ?? 30;
   if (
     ask &&
-    !window.confirm(`${days}일 이상 지난 휴지통 기록을 완전 삭제할까요? 복원할 수 없습니다.`)
+    !(await confirmDialog(
+      '휴지통 완전 삭제',
+      `${days}일 이상 지난 휴지통 기록을 완전 삭제할까요? 복원할 수 없습니다.`,
+      { accept: '완전 삭제', danger: true },
+    ))
   )
     return;
   let ids;

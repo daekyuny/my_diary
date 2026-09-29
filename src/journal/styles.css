@@ -1363,6 +1363,37 @@ dialog::backdrop {
   background: #845841;
   border-color: #9c7358;
 }
+.toast:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.toast-action {
+  min-height: 0;
+  padding: 2px 0;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.toast-action:hover:not(:disabled) {
+  background: none;
+  color: #dbe8d4;
+}
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+.button.danger {
+  color: #88584e;
+  border-color: #e4cec7;
+}
+.button.danger:hover:not(:disabled) {
+  background: #f6ece9;
+}
 @media (min-width: 1550px) {
   main {
     padding-top: 53px;
