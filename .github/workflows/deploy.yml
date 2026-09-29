@@ -3,6 +3,13 @@ name: Test and deploy Firebase Hosting
 on:
   push:
     branches: [main]
+    # Docs, task logs and agent settings are not part of the built site: skip tests and deploy.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'tasks/**'
+      - '.claude/**'
+      - 'LICENSE'
   pull_request:
     branches: [main]
   workflow_dispatch:
