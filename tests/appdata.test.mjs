@@ -36,7 +36,11 @@ function memory() {
       );
     },
     async read(id) {
-      if (!files.has(id)) throw new Error(`Missing ${id}`);
+      if (!files.has(id)) {
+        const error = new Error(`Missing ${id}`);
+        error.status = 404;
+        throw error;
+      }
       return files.get(id).blob;
     },
     async write(namespace, kind, key, blob) {
@@ -44,7 +48,7 @@ function memory() {
       files.set(id, {
         id,
         appProperties: { format: 'my-diary-private-v1', namespace, kind, key },
-        createdTime: String(count).padStart(6, '0'),
+        createdTime: new Date(Date.now() - 60000 + count).toISOString(),
         blob,
       });
       log.push(id);
@@ -254,6 +258,41 @@ test('a stale change token falls back to a full listing with a fresh token', asy
   assert.deepEqual(counts, { list: 1, changes: 1, startToken: 1, read: 0 });
   assert.equal(reloaded.token, String(io.log.length));
   assert.equal((await cacheStore.loadListing()).token, reloaded.token);
+});
+test('compaction keeps every head, drops superseded revisions and seeds, and tolerates races', async () => {
+  const seed = makeRevision(newEntry());
+  const { repo, io } = await setup([seed]);
+  const a = makeRevision({ ...seed.entry, body: 'A' }, [seed.id]);
+  const b = makeRevision({ ...seed.entry, body: 'B' }, [a.id]);
+  await repo.saveMany([a, b]);
+  const other = makeRevision(newEntry());
+  const left = makeRevision({ ...other.entry, body: 'left' }, [other.id]);
+  const right = makeRevision({ ...other.entry, body: 'right' }, [other.id]);
+  await repo.saveMany([other, left, right]);
+  assert.equal(await repo.compact({ minAge: 3600000 }), 0);
+  assert.equal(await repo.compact({ minAge: 0, now: Date.now() + 1 }), 3);
+  const kinds = (await io.list('sheet')).map((f) => f.appProperties.kind);
+  assert.equal(kinds.filter((k) => k === 'seed').length, 0);
+  assert.equal(kinds.filter((k) => k === 'revision').length, 3);
+  const fresh = new AppDataRepository('sheet', io);
+  const index = await fresh.list();
+  assert.equal(index.length, 2);
+  assert.equal(index.find((r) => r.entry.id === seed.entry.id).entry.body, 'B');
+  assert.ok(index.find((r) => r.entry.id === other.entry.id).cloudConflict);
+  // A newer edit based on the surviving head is still not a conflict afterwards.
+  const c = makeRevision({ ...seed.entry, body: 'C' }, [b.id]);
+  await fresh.save(c);
+  assert.ok(!(await fresh.list()).find((r) => r.entry.id === seed.entry.id).conflict);
+  // A listing taken before another device compacted still loads by skipping missing files.
+  const stale = new AppDataRepository('sheet', io);
+  await stale.list();
+  const victim = stale.files.find((f) => stale.cache.get(f.id)?.id === b.id);
+  io.files.delete(victim.id);
+  stale.cache.delete(victim.id);
+  stale.files = [...stale.files];
+  stale.token = null;
+  io.list = async () => stale.files;
+  assert.equal((await stale.list()).length, 2);
 });
 test('concurrent devices preserve both edits and resolving keeps a separate copy', async () => {
   const first = makeRevision(newEntry());

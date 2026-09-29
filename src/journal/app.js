@@ -267,6 +267,17 @@ async function load() {
 }
 const cloud = () => (repository && google.connected() ? repository : null);
 const hydrate = (revision) => hydrateRevision(cloud(), revision);
+let lastCompact = 0;
+// Housekeeping after connecting or syncing: at most hourly, never surfaced as an error.
+async function compactCloud() {
+  if (!cloud() || !navigator.onLine || Date.now() - lastCompact < 3600000) return;
+  lastCompact = Date.now();
+  try {
+    await repository.compact();
+  } catch {
+    /* Compaction is retried on a later connection. */
+  }
+}
 async function refresh(options = {}) {
   if (!cloud() || !navigator.onLine) return;
   await pullRemote(repository, options);
@@ -342,6 +353,7 @@ function syncCloud() {
     } while (syncAgain || (await pendingRevisions()).length);
     // Other devices are polled anyway; reuse the listing taken while pushing this batch.
     if (!entry && !busy) await refresh({ maxAge: 15000 });
+    await compactCloud();
     syncImages = [];
     await cleanLocalPhotos(entry?.images || []);
     const conflicts = await conflictedRevisions();
@@ -534,6 +546,7 @@ async function selectRepository(id, closeSettings = true) {
   await purgeTrash(false);
   // Pull the other devices' records now, reusing the listing fetched a moment ago.
   await refresh({ maxAge: 15000 });
+  await compactCloud();
   $('#cloud-error').hidden = true;
   $('#repository-options').hidden = true;
   if (closeSettings) $('#settings-dialog').close();

@@ -186,7 +186,11 @@ export class AppDataRepository {
     this.purged = new Set(tombstones.map((f) => f.appProperties.key));
     this.files = files;
     const unique = new Map();
-    const selected = (this.root.seeds || []).filter((seed) => !this.purged.has(seed.entryId));
+    // Seeds the root still references but compaction has deleted are simply gone.
+    const listed = new Set(files.map((f) => f.id));
+    const selected = (this.root.seeds || []).filter(
+      (seed) => !this.purged.has(seed.entryId) && listed.has(seed.id),
+    );
     const readable = new Map(
       [...files.filter((f) => f.appProperties.kind === 'revision'), ...selected].map((f) => [
         f.id,
@@ -220,6 +224,12 @@ export class AppDataRepository {
             await this.cacheStore?.put(file.id, revision).catch(() => {});
             this.progress(`일기 불러오는 중 ${++completed}/${missing.length}`);
           } catch (error) {
+            // Another device may have compacted this file after our listing was taken.
+            if (error.status === 404) {
+              readable.delete(file.id);
+              this.files = this.files.filter((f) => f.id !== file.id);
+              continue;
+            }
             failed = true;
             throw error;
           }
@@ -323,6 +333,37 @@ export class AppDataRepository {
       throw new Error('올바른 휴지통 보관 기간을 선택해주세요.');
     await this.io.write(this.id, 'retention', crypto.randomUUID(), jsonBlob({ days }));
     this.retentionDays = days;
+  }
+  // Delete revision and seed files that are no longer a head of any diary. Heads are enough
+  // for conflict detection, so the listing stays close to the number of diaries.
+  async compact({ minAge = 3600000, now = Date.now() } = {}) {
+    await this.list({ maxAge: 15000 });
+    const heads = new Set(entryGroups(this.versions).flatMap((g) => g.heads.map((h) => h.id)));
+    const removable = this.files.filter((f) => {
+      if (!['revision', 'seed'].includes(f.appProperties.kind)) return false;
+      const revision = this.cache.get(f.id);
+      if (!revision || heads.has(revision.id)) return false;
+      const created = Date.parse(f.createdTime || revision.savedAt);
+      return Number.isFinite(created) && now - created >= minAge;
+    });
+    const gone = new Set();
+    for (const file of removable) {
+      try {
+        await this.io.remove(file.id);
+      } catch (error) {
+        if (error.status !== 404) throw error;
+      }
+      gone.add(this.cache.get(file.id).id);
+      this.cache.delete(file.id);
+      this.files = this.files.filter((f) => f.id !== file.id);
+    }
+    if (removable.length) {
+      this.versions = this.versions.filter((v) => !gone.has(v.id));
+      this.rebuildIndex();
+      await this.cacheStore?.prune(new Set(this.cache.keys())).catch(() => {});
+      await this.persistListing();
+    }
+    return removable.length;
   }
   async purge(days) {
     await this.list({ maxAge: 15000 });
