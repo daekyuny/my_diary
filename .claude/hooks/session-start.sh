@@ -18,6 +18,6 @@ else
 fi
 dirty=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
 [ "$dirty" -gt 0 ] && state="$state 커밋되지 않은 변경 ${dirty}개가 있습니다."
-rc="다른 PC로 옮겨 이어서 하려면 이 PC에서 Remote Control을 켜 두면 됩니다 (claude --rc 로 시작하거나 claude remote-control 실행)."
+rc="외출 중 폰에서 이 세션을 이어가려면 Remote Control을 켜 두세요 (claude --rc 로 시작하거나 claude remote-control 실행)."
 escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 printf '{"systemMessage":"%s"}\n' "$(escape "$state $rc")"
