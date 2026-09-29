@@ -30,6 +30,21 @@ export async function mock(context, state) {
     state.calls.push(`${request.method()} ${url.pathname}`);
     if (url.pathname === '/drive/v3/about')
       return send({ user: { permissionId: 'owner', emailAddress: 'test@example.com' } });
+    if (url.pathname === '/drive/v3/changes/startPageToken')
+      return send({ startPageToken: String(state.log.length) });
+    if (url.pathname === '/drive/v3/changes') {
+      const token = Number(url.searchParams.get('pageToken'));
+      if (!Number.isInteger(token) || token > state.log.length)
+        return route.fulfill({ status: 410, json: { error: { message: 'stale token' } } });
+      return send({
+        newStartPageToken: String(state.log.length),
+        changes: state.log.slice(token).map((id) => {
+          const file = state.files.get(id);
+          const { bytes, ...meta } = file || {};
+          return { fileId: id, removed: !file, file: file ? meta : undefined };
+        }),
+      });
+    }
     if (url.pathname === '/drive/v3/files') {
       expect(request.method()).toBe('GET');
       if (url.searchParams.get('spaces') !== 'appDataFolder') return send({ files: [] });
@@ -61,12 +76,14 @@ export async function mock(context, state) {
       const bytes = Buffer.from(parts[2].slice(parts[2].indexOf('\r\n\r\n') + 4, -2), 'binary');
       const id = `private-${++state.next}`;
       state.files.set(id, { ...metadata, id, createdTime: new Date().toISOString(), bytes });
+      state.log.push(id);
       return send({ id, sha256Checksum: createHash('sha256').update(bytes).digest('hex') });
     }
     if (url.pathname.startsWith('/drive/v3/files/')) {
       const id = url.pathname.split('/').at(-1);
       if (request.method() === 'DELETE') {
         state.files.delete(id);
+        state.log.push(id);
         return send({});
       }
       const file = state.files.get(id);
@@ -79,7 +96,7 @@ export async function mock(context, state) {
     throw new Error(`Unexpected ${request.method()} ${url}`);
   });
 }
-export const state = () => ({ files: new Map(), next: 0, calls: [] });
+export const state = () => ({ files: new Map(), log: [], next: 0, calls: [] });
 // Pre-populate a repository the way the former Sheets migration left it: seeds plus a root.
 export function seedRepository(state, revision, namespace = 'private-personal') {
   const put = (kind, key, value) => {
@@ -92,6 +109,7 @@ export function seedRepository(state, revision, namespace = 'private-personal') 
       createdTime: new Date().toISOString(),
       bytes: Buffer.from(JSON.stringify(value)),
     });
+    state.log.push(id);
     return id;
   };
   const seed = put('seed', revision.id, revision);

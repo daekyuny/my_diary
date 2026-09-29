@@ -1080,10 +1080,18 @@ async function reconnect() {
       const identity = await google.identity();
       if (identity.permissionId !== account.permissionId)
         throw new Error('Google 계정이 달라 다시 연결해야 합니다.');
+      const preferred = settings.sheets?.[account.permissionId];
+      if (preferred) {
+        // The cached listing lets a known repository open without discovering it again.
+        try {
+          await selectRepository(preferred, false);
+          return;
+        } catch (error) {
+          if (!error.missingRepository) throw error;
+        }
+      }
       const files = await findRepositories();
-      const file =
-        files.find((f) => f.id === settings.sheets?.[account.permissionId]) ||
-        (files.length === 1 ? files[0] : null);
+      const file = files.find((f) => f.id === preferred) || (files.length === 1 ? files[0] : null);
       if (file) await selectRepository(file.id, false);
     }
   } catch (error) {

@@ -5,9 +5,29 @@ import { newEntry, makeRevision } from '../src/model.js';
 
 function memory() {
   const files = new Map();
+  const log = [];
   let count = 0;
   return {
     files,
+    log,
+    async startToken() {
+      return String(log.length);
+    },
+    async changes(token) {
+      if (!/^\d+$/.test(token) || Number(token) > log.length) {
+        const error = new Error('stale');
+        error.stale = true;
+        throw error;
+      }
+      return {
+        changes: log.slice(Number(token)).map((id) => ({
+          fileId: id,
+          removed: !files.has(id),
+          file: files.has(id) ? { ...files.get(id), blob: undefined } : undefined,
+        })),
+        token: String(log.length),
+      };
+    },
     async list(namespace, kind) {
       return [...files.values()].filter(
         (f) =>
@@ -21,11 +41,18 @@ function memory() {
     },
     async write(namespace, kind, key, blob) {
       const id = `f${++count}`;
-      files.set(id, { id, appProperties: { namespace, kind, key }, blob });
+      files.set(id, {
+        id,
+        appProperties: { format: 'my-diary-private-v1', namespace, kind, key },
+        createdTime: String(count).padStart(6, '0'),
+        blob,
+      });
+      log.push(id);
       return id;
     },
     async remove(id) {
       files.delete(id);
+      log.push(id);
     },
   };
 }
@@ -126,11 +153,13 @@ test('saving a batch lists once and extends the index without another listing', 
   };
   const counting = new AppDataRepository('sheet', io, { cacheStore });
   let lists = 0;
-  const list = io.list.bind(io);
-  io.list = async (...args) => {
-    lists++;
-    return list(...args);
-  };
+  for (const name of ['list', 'changes']) {
+    const original = io[name].bind(io);
+    io[name] = async (...args) => {
+      lists++;
+      return original(...args);
+    };
+  }
   await counting.list();
   lists = 0;
   const a = makeRevision({ ...first.entry, body: 'A' }, [first.id]);
@@ -143,6 +172,88 @@ test('saving a batch lists once and extends the index without another listing', 
   lists = 0;
   await counting.purge(30);
   assert.equal(lists, 0);
+});
+function listingCache() {
+  let listing = null;
+  const revisions = new Map();
+  return {
+    async load() {
+      return [...revisions].map(([id, revision]) => ({ id, revision }));
+    },
+    async put(id, revision) {
+      revisions.set(id, revision);
+    },
+    async prune(ids) {
+      for (const id of revisions.keys()) if (!ids.has(id)) revisions.delete(id);
+    },
+    async loadListing() {
+      return listing;
+    },
+    async saveListing(value) {
+      listing = structuredClone(value);
+    },
+  };
+}
+function countRequests(io) {
+  const counts = { list: 0, changes: 0, startToken: 0, read: 0 };
+  for (const name of Object.keys(counts)) {
+    const original = io[name].bind(io);
+    io[name] = async (...args) => {
+      counts[name]++;
+      return original(...args);
+    };
+  }
+  return counts;
+}
+test('a restored listing asks Drive for changes only and applies writes and removals', async () => {
+  const first = makeRevision(newEntry());
+  const { io } = await setup([first]);
+  const cacheStore = listingCache();
+  await new AppDataRepository('sheet', io, { cacheStore }).list();
+  const counts = countRequests(io);
+  const reloaded = new AppDataRepository('sheet', io, { cacheStore });
+  assert.equal((await reloaded.list())[0].id, first.id);
+  assert.deepEqual(counts, { list: 0, changes: 1, startToken: 0, read: 0 });
+  const other = new AppDataRepository('sheet', io);
+  const newer = makeRevision({ ...first.entry, body: 'other device' }, [first.id]);
+  await other.save(newer);
+  const doomed = makeRevision({ ...newEntry(), deletedAt: '2020-01-01T00:00:00Z' });
+  await other.save(doomed);
+  const reset = () => Object.assign(counts, { list: 0, changes: 0, startToken: 0, read: 0 });
+  reset();
+  assert.equal((await reloaded.list()).length, 2);
+  assert.equal(
+    reloaded.index.find((r) => r.entry.id === first.entry.id).entry.body,
+    'other device',
+  );
+  assert.equal(counts.list, 0);
+  assert.equal(counts.changes, 1);
+  await other.purge(30);
+  reset();
+  assert.equal((await reloaded.list()).length, 1);
+  assert.equal(counts.list, 0);
+  const retention = await io.write(
+    'sheet',
+    'retention',
+    'r',
+    new Blob([JSON.stringify({ days: 7 })]),
+  );
+  await reloaded.list();
+  assert.equal(reloaded.retentionDays, 7);
+  assert.ok(reloaded.files.some((f) => f.id === retention));
+});
+test('a stale change token falls back to a full listing with a fresh token', async () => {
+  const { io } = await setup([makeRevision(newEntry())]);
+  const cacheStore = listingCache();
+  const repo = new AppDataRepository('sheet', io, { cacheStore });
+  await repo.list();
+  await cacheStore.saveListing({ token: 'expired', files: repo.files, root: repo.root });
+  const counts = countRequests(io);
+  const reloaded = new AppDataRepository('sheet', io, { cacheStore });
+  assert.equal((await reloaded.list()).length, 1);
+  assert.deepEqual(counts, { list: 1, changes: 1, startToken: 1, read: 0 });
+  assert.equal(reloaded.token, String(io.log.length));
+  assert.equal((await cacheStore.loadListing()).token, reloaded.token);
 });
 test('concurrent devices preserve both edits and resolving keeps a separate copy', async () => {
   const first = makeRevision(newEntry());

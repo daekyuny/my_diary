@@ -3,6 +3,8 @@ import { validateRevision, entryGroups, makeRevision } from '../model.js';
 import { expired } from './current.js';
 
 const FORMAT = 'my-diary-private-v1';
+const FILE_FIELDS = 'id,name,appProperties,createdTime';
+const byCreation = (a, b) => `${a.createdTime}:${a.id}`.localeCompare(`${b.createdTime}:${b.id}`);
 const jsonBlob = (value) => new Blob([JSON.stringify(value)], { type: 'application/json' });
 const quote = (s) => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 export const driveStore = {
@@ -17,7 +19,7 @@ export const driveStore = {
       const params = new URLSearchParams({
         spaces: 'appDataFolder',
         q: q.join(' and '),
-        fields: 'nextPageToken,files(id,name,appProperties,createdTime)',
+        fields: `nextPageToken,files(${FILE_FIELDS})`,
         pageSize: '1000',
         ...(pageToken ? { pageToken } : {}),
       });
@@ -25,9 +27,39 @@ export const driveStore = {
       files.push(...data.files);
       pageToken = data.nextPageToken;
     } while (pageToken);
-    return files.sort((a, b) =>
-      `${a.createdTime}:${a.id}`.localeCompare(`${b.createdTime}:${b.id}`),
-    );
+    return files.sort(byCreation);
+  },
+  // Change tokens let a device ask "what changed since last time" instead of relisting.
+  async startToken() {
+    const params = new URLSearchParams({ spaces: 'appDataFolder' });
+    return (await (await google.request(`drive/v3/changes/startPageToken?${params}`)).json())
+      .startPageToken;
+  },
+  async changes(token) {
+    const changes = [];
+    let pageToken = token,
+      newStartPageToken;
+    do {
+      const params = new URLSearchParams({
+        pageToken,
+        spaces: 'appDataFolder',
+        includeRemoved: 'true',
+        pageSize: '1000',
+        fields: `nextPageToken,newStartPageToken,changes(fileId,removed,file(${FILE_FIELDS},trashed))`,
+      });
+      let data;
+      try {
+        data = await (await google.request(`drive/v3/changes?${params}`)).json();
+      } catch (error) {
+        // An expired or foreign token means a full listing is required.
+        if ([400, 404, 410].includes(error.status)) error.stale = true;
+        throw error;
+      }
+      changes.push(...data.changes);
+      pageToken = data.nextPageToken;
+      newStartPageToken = data.newStartPageToken || newStartPageToken;
+    } while (pageToken);
+    return { changes, token: newStartPageToken || token };
   },
   async read(id) {
     return (await google.request(`drive/v3/files/${encodeURIComponent(id)}?alt=media`)).blob();
@@ -89,17 +121,66 @@ export class AppDataRepository {
     this.cacheStore = cacheStore;
     this.progress = progress;
   }
+  // Restore the previous listing, change token and root from the device once per instance.
+  async restore() {
+    if (this.restored) return;
+    this.restored = true;
+    const saved = await this.cacheStore?.loadListing?.().catch(() => null);
+    if (saved?.token && Array.isArray(saved.files) && saved.root?.format === FORMAT) {
+      this.files = saved.files;
+      this.token = saved.token;
+      this.root = saved.root;
+    }
+  }
   async prepare(roots) {
+    await this.restore();
+    if (this.root) return;
     roots ||= await this.io.list(this.id, 'root');
-    if (!roots.length) throw new Error('앱 전용 저장소 연결 또는 이전이 필요합니다.');
+    if (!roots.length) {
+      const error = new Error('앱 전용 저장소 연결 또는 이전이 필요합니다.');
+      error.missingRepository = true;
+      throw error;
+    }
     this.root = await readJSON(this.io, roots[0].id);
     if (this.root.format !== FORMAT) throw new Error('지원하지 않는 저장소 형식입니다.');
+  }
+  persistListing() {
+    return (
+      this.cacheStore
+        ?.saveListing?.({ token: this.token, files: this.files, root: this.root })
+        .catch(() => {}) || Promise.resolve()
+    );
+  }
+  // Apply Drive changes since `this.token` to the known files; null means a full listing is needed.
+  async incrementalFiles() {
+    if (!this.files || !this.token || !this.io.changes) return null;
+    let result;
+    try {
+      result = await this.io.changes(this.token);
+    } catch (error) {
+      if (error.stale) return null;
+      throw error;
+    }
+    const files = new Map(this.files.map((f) => [f.id, f]));
+    for (const change of result.changes) {
+      const file = change.file;
+      if (change.removed || !file || file.trashed) files.delete(change.fileId);
+      else if (file.appProperties?.format === FORMAT && file.appProperties.namespace === this.id)
+        files.set(file.id, { ...file, trashed: undefined });
+    }
+    this.token = result.token;
+    return [...files.values()].sort(byCreation);
   }
   // `maxAge` reuses a listing fetched within that many milliseconds instead of asking Drive again.
   async list({ maxAge = 0 } = {}) {
     if (this.files && Date.now() - this.listedAt < maxAge) return this.index;
     if (!this.root) await this.prepare();
-    const files = await this.io.list(this.id);
+    let files = await this.incrementalFiles();
+    if (!files) {
+      // Take the token first so changes made during the listing are replayed next time.
+      this.token = this.io.startToken ? await this.io.startToken() : null;
+      files = await this.io.list(this.id);
+    }
     this.listedAt = Date.now();
     const tombstones = files.filter((f) => f.appProperties.kind === 'purge');
     this.purged = new Set(tombstones.map((f) => f.appProperties.key));
@@ -163,6 +244,7 @@ export class AppDataRepository {
     this.retentionDays = settings.length
       ? (await readJSON(this.io, settings.at(-1).id)).days
       : this.root.retentionDays;
+    await this.persistListing();
     return this.index;
   }
   rebuildIndex() {
@@ -229,6 +311,7 @@ export class AppDataRepository {
       this.versions.push(value);
       this.rebuildIndex();
     }
+    await this.persistListing();
   }
   async resolve(revision, copy) {
     const resolved = makeRevision(revision.conflict.entry, [revision.id, revision.conflict.id]);
