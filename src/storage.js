@@ -44,29 +44,6 @@ export async function put(store, value) {
 }
 export const remove = (store, id) => run(store, 'readwrite', (table) => table.delete(id));
 
-export function readSettings() {
-  try {
-    return JSON.parse(localStorage.getItem('my-diary-settings') || '{}');
-  } catch {
-    return {};
-  }
-}
-export function saveSettings(value) {
-  localStorage.setItem('my-diary-settings', JSON.stringify(value));
-}
-
-// Commit the revision and remove its draft together, including across page reloads.
-export function commitRevision(revision) {
-  return new Promise((resolve, reject) => {
-    const tx = database.transaction(['revisions', 'drafts'], 'readwrite');
-    tx.objectStore('revisions').put(revision);
-    tx.objectStore('drafts').delete(revision.entry.id);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error || new Error('기기에 저장하지 못했습니다.'));
-  });
-}
-
 export function replaceCurrent(revision) {
   return new Promise((resolve, reject) => {
     const tx = database.transaction(['revisions', 'drafts'], 'readwrite');

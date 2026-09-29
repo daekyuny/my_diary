@@ -31,12 +31,7 @@ async function fixture() {
         res.setHeader('Content-Type', 'application/json');
         return res.end(JSON.stringify({ googleClientId: '', authServer: false }));
       }
-      const file =
-        pathname === '/'
-          ? '/index.html'
-          : pathname === '/vendor/fflate.js'
-            ? '/node_modules/fflate/esm/browser.js'
-            : pathname;
+      const file = pathname === '/' ? '/index.html' : pathname;
       const target = path.resolve(root, '.' + file);
       if (!target.startsWith(root + path.sep)) throw new Error('path');
       let body = await readFile(target);

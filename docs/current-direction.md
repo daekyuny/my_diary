@@ -45,4 +45,4 @@
 
 - 사용자가 모든 기기를 Drive 앱 전용 저장소(appdata)로 옮겨 사용 중임을 확인했다. 시트 → appdata 이전 코드(`sheets.js`, `sheet-lock.js`, `sheets-quota.js`, 설정의 이전 UI)와 관련 테스트를 제거했다. 이전 때 만든 `seed` 파일은 계속 읽는다.
 - `app.js`를 역할별 모듈로 나누고 `AGENTS.md`를 현행화했다. 순수 함수는 `tests/journal-modules.test.mjs`로 검증한다.
-- OAuth 범위는 그대로 둔다. `drive.file`은 `legacy.html`이 쓰며, 구버전 Drive 앱 제거 여부는 아직 결정하지 않았다.
+- 첫 세대 Drive 폴더 앱(`legacy.html`, `src/app.js`, 날씨·알림 모듈)과 Cloudflare 푸시 Worker, 관련 테스트를 제거했다. OAuth 범위에서 `drive.file`을 빼고 `drive.appdata`와 선택적 `calendar.readonly`만 요청한다.

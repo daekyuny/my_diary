@@ -13,9 +13,8 @@
   - `views.js`, `labels.js`, `icons.js`, `dom.js`, `photo-viewer.js`: HTML 템플릿, 상태 문구, 아이콘, `$`·toast·download, 사진 뷰어
   - `photos.js`, `backup.js`, `calendar.js`, `updates.js`, `revision-cache.js`, `current.js`: 사진, ZIP 인코딩, Calendar 조회, 앱 업데이트, 수정본 캐시, 수정본 그룹화·연결
   - 순수 함수(`views.js`, `labels.js`, `current.js`, `cloud-sync.js`의 `batches`)는 `tests/journal-modules.test.mjs`에서 검증합니다.
-- `src/*.js`: 두 앱이 공유하는 기반. `model.js`(수정본 스키마·검증), `storage.js`(IndexedDB), `google.js`(OAuth·Drive·Calendar 요청), `sync.js`, `body-links.js`
-- `legacy.html`, `src/app.js`, `src/weather.js`, `src/notifications.js`, `src/backup.js`, `src/styles.css`: 이전 세대 Drive 폴더 기반 앱. 유지만 하며 변경하지 않습니다.
-- `server/`: 토큰 갱신용 Firebase Functions. `worker/`: 푸시 알림용 Cloudflare Worker. 둘 다 별도 배포합니다.
+- `src/*.js`: 공통 기반. `model.js`(수정본 스키마·검증), `storage.js`(IndexedDB), `google.js`(OAuth·Drive·Calendar 요청), `body-links.js`
+- `server/`: 토큰 갱신용 Firebase Functions. 별도 배포합니다.
 - `scripts/`: 개발 서버·빌드·아이콘 생성. `tests/`: Node 단위 테스트(`*.test.mjs`)와 `tests/browser/` Playwright 테스트
 - `vendor/`, `dist/`, `artifacts/`, `test-results/`는 생성물이므로 커밋하지 않습니다.
 

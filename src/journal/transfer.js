@@ -1,7 +1,7 @@
 import * as store from '../storage.js';
-import { assetBlob } from '../sync.js';
 import { localDate } from '../model.js';
 import { parseArchive, stableKeepIds, makeBackup } from './backup.js';
+import { assetBlob } from './photos.js';
 // Import a My Diary or Keep ZIP into the device store. Returns how many records were new.
 export async function importArchive(file) {
   if (file.size > 100 * 1024 * 1024) throw new Error('100MB 이하 ZIP을 선택해주세요.');

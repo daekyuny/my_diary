@@ -1,19 +1,14 @@
-import { parseRevision, revisionFile, imageFileName, calendarEvent } from './model.js';
+import { calendarEvent } from './model.js';
 
-export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 export const APPDATA_SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 export const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
 let token = '';
 let expiresAt = 0;
 let scopes = '';
-let folderId = '';
 let clientId = '';
 let authServer = false;
 let refreshing;
 const SESSION_KEY = 'my-diary-google-access';
-export function useFolder(id) {
-  folderId = id;
-}
 export function configureGoogle(id, persistent = false) {
   clientId = id;
   authServer = persistent;
@@ -86,7 +81,6 @@ export function disconnect() {
   if (authServer) authCall('logout').catch(() => {});
   token = '';
   scopes = '';
-  folderId = '';
   expiresAt = 0;
 }
 
@@ -108,7 +102,7 @@ export function authorize(calendar = false) {
         new Error('Google 로그인 응답을 받지 못했습니다. 로그인 창을 확인한 뒤 다시 연결해주세요.'),
       );
     }, 90000);
-    const wanted = [DRIVE_SCOPE, APPDATA_SCOPE, ...(calendar ? [CALENDAR_SCOPE] : [])];
+    const wanted = [APPDATA_SCOPE, ...(calendar ? [CALENDAR_SCOPE] : [])];
     google.accounts.oauth2
       .initTokenClient({
         client_id: clientId,
@@ -125,7 +119,6 @@ export function authorize(calendar = false) {
           expiresAt = Date.now() + (response.expires_in - 60) * 1000;
           scopes = response.scope;
           remember();
-          folderId = '';
           resolve();
         },
         error_callback() {
@@ -194,116 +187,8 @@ export async function identity() {
   ).user;
 }
 
-async function listFiles(query) {
-  let pageToken = '';
-  const files = [];
-  do {
-    const params = new URLSearchParams({
-      q: query,
-      fields: 'nextPageToken,files(id,name,appProperties)',
-      pageSize: '1000',
-      ...(pageToken ? { pageToken } : {}),
-    });
-    const result = await (await request(`drive/v3/files?${params}`)).json();
-    files.push(...result.files);
-    pageToken = result.nextPageToken;
-  } while (pageToken);
-  return files;
-}
-
-async function findOrCreateFolder(name, query, parents) {
-  const folders = await listFiles(
-    `trashed = false and mimeType = 'application/vnd.google-apps.folder' and ${query}`,
-  );
-  if (folders.length) return folders[0].id;
-  const result = await request('drive/v3/files?fields=id', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name,
-      mimeType: 'application/vnd.google-apps.folder',
-      ...(parents ? { parents } : {}),
-      appProperties: { myDiary: 'v1', kind: name },
-    }),
-  });
-  return (await result.json()).id;
-}
-
-export async function ensureFolder() {
-  folderId ||= await findOrCreateFolder(
-    'My Diary',
-    "appProperties has { key='myDiary' and value='v1' } and appProperties has { key='kind' and value='My Diary' }",
-  );
-  return folderId;
-}
-
-async function upload(name, blob, properties, parent) {
-  const boundary = `diary_${crypto.randomUUID()}`;
-  const metadata = { name, parents: [parent], appProperties: { myDiary: 'v1', ...properties } };
-  const body = new Blob([
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n`,
-    blob,
-    `\r\n--${boundary}--`,
-  ]);
-  return (
-    await (
-      await request('upload/drive/v3/files?uploadType=multipart&fields=id', {
-        method: 'POST',
-        headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
-        body,
-      })
-    ).json()
-  ).id;
-}
-
-export async function remoteRevisions() {
-  await ensureFolder();
-  // Search all app-owned revision files: simultaneous first-run folder creation cannot hide data.
-  return listFiles(
-    "trashed = false and appProperties has { key='myDiary' and value='v1' } and appProperties has { key='kind' and value='revision' }",
-  );
-}
-export async function downloadRevision(id) {
-  return parseRevision(
-    await (await request(`drive/v3/files/${encodeURIComponent(id)}?alt=media`)).text(),
-  );
-}
 export async function downloadAsset(id) {
   return (await request(`drive/v3/files/${encodeURIComponent(id)}?alt=media`)).blob();
-}
-
-export async function uploadAsset(asset) {
-  const parent = await findOrCreateFolder(
-    'attachments',
-    `'${await ensureFolder()}' in parents and name = 'attachments'`,
-    [folderId],
-  );
-  const existing = await listFiles(
-    `trashed = false and appProperties has { key='assetId' and value='${asset.id}' }`,
-  );
-  return (
-    existing[0]?.id ||
-    upload(
-      asset.managedName || asset.id.endsWith('-thumbnail') ? asset.name : imageFileName(asset),
-      asset.blob,
-      { kind: 'asset', assetId: asset.id },
-      parent,
-    )
-  );
-}
-export async function uploadRevision(revision) {
-  const existing = await listFiles(
-    `trashed = false and appProperties has { key='revisionId' and value='${revision.id}' }`,
-  );
-  return (
-    existing[0]?.id ||
-    upload(
-      `${revision.entry.date}_${revision.id}.md`,
-      new Blob([revisionFile(revision)], { type: 'text/markdown' }),
-      { kind: 'revision', revisionId: revision.id },
-      await ensureFolder(),
-    )
-  );
 }
 
 export async function calendars() {
@@ -364,7 +249,7 @@ function authorizeCode(calendar) {
     globalThis.google.accounts.oauth2
       .initCodeClient({
         client_id: clientId,
-        scope: [DRIVE_SCOPE, APPDATA_SCOPE, ...(calendar ? [CALENDAR_SCOPE] : [])].join(' '),
+        scope: [APPDATA_SCOPE, ...(calendar ? [CALENDAR_SCOPE] : [])].join(' '),
         ux_mode: 'popup',
         prompt: 'consent',
         callback: (response) => {

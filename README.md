@@ -50,7 +50,7 @@ Linux WebKit 실행에는 시스템 라이브러리가 필요할 수 있습니�
 5. 앱 전용 저장소가 하나면 자동으로 연결합니다. 여러 개면 설정에서 선택합니다. 신규 사용자는 **새 일기 저장소 만들기**를 누릅니다.
 6. 모든 PC와 모바일에서 같은 Google 계정, 같은 OAuth 앱 프로젝트, 최신 앱 버전을 사용합니다. 새 저장소는 앱 속성으로 자동 발견합니다. OAuth 프로젝트를 바꾸면 기존 앱 전용 데이터에 접근하지 못할 수 있습니다.
 
-`drive.appdata`는 일기·사진 저장에 사용합니다. `drive.file`은 `/legacy.html`의 이전 Drive 앱이 사용하며, 기존 토큰과의 호환을 위해 함께 요청합니다. 캘린더에는 선택적으로 `calendar.readonly`를 요청합니다. Google Auth Platform의 데이터 액세스 설정에도 범위를 등록하세요.
+요청하는 권한은 `drive.appdata`와 선택적인 `calendar.readonly`뿐입니다. 일반 Drive 파일 권한(`drive.file`)은 더 이상 요청하지 않습니다. Google Auth Platform의 데이터 액세스 설정에도 범위를 등록하세요.
 
 기존 Google Sheets 저장소에서 앱 전용 저장소로의 이전은 2026년 9월에 완료했고, 이전 코드는 제거했습니다. 이전 당시 복사한 `seed` 파일은 앱 전용 저장소 안에 그대로 남아 계속 읽습니다.
 
@@ -58,8 +58,7 @@ Linux WebKit 실행에는 시스템 라이브러리가 필요할 수 있습니�
 
 ```json
 {
-  "googleClientId": "YOUR_CLIENT_ID.apps.googleusercontent.com",
-  "notificationServer": ""
+  "googleClientId": "YOUR_CLIENT_ID.apps.googleusercontent.com"
 }
 ```
 
@@ -103,7 +102,7 @@ JPG·PNG·WebP·GIF, 사진당 10MB까지 지원합니다. 일기를 열면 썸�
 - 지원하지 않는 첨부나 원본 누락은 가져오기 전에 오류로 알립니다. 입력 ZIP 100MB, 압축 해제 총 300MB까지 지원합니다.
 - 백업은 기기에 알려진 모든 수정과 원본 사진을 포함합니다. 전체 최신 자료를 원하면 먼저 Google에 연결하고 새로고침합니다. 아직 본문·사진을 받지 못했으면 불완전한 백업을 성공으로 내보내지 않습니다.
 
-이전 Drive 버전은 `/legacy.html`에 보존되어 있습니다. [이전 버전 사용 안내](docs/legacy-drive.md)를 참고하세요. 해당 화면의 Drive 동기화는 사용자가 직접 실행한 경우에만 수행됩니다. 새 앱의 저장은 앱 전용 공간을 사용합니다. 기존 Drive 파일 삭제는 사용자가 직접 진행합니다.
+첫 세대 Drive 폴더 앱(`/legacy.html`)과 푸시 알림 Worker는 2026년 9월에 제거했습니다. 기존 `My Diary` Drive 폴더의 파일은 앱이 건드리지 않으므로 필요하면 직접 정리합니다.
 
 ## 개발 구조와 배포
 
@@ -112,8 +111,8 @@ JPG·PNG·WebP·GIF, 사진당 10MB까지 지원합니다. 일기를 열면 썸�
 - `src/journal/appdata.js`: 앱 전용 저장소·버전 충돌·휴지통 정리
 - `src/journal/remote.js`, `cloud-sync.js`, `local.js`: 클라우드 병합, 묶음 전송, 기기 저장소
 - `src/journal/backup.js`: Keep/My Diary ZIP 가져오기와 백업
-- `src/model.js`, `storage.js`, `google.js`, `sync.js`: 공통 모델·IndexedDB·Google API·사진 조회
-- `src/app.js`, `legacy.html`: 이전 Drive 일기 앱
+- `src/model.js`, `storage.js`, `google.js`, `body-links.js`: 수정본 모델·IndexedDB·Google API·본문 링크
+- `server/`: 토큰 갱신용 Firebase Functions
 - `scripts/`: esbuild 번들·개발 서버·정적 빌드
 - `tests/`: 모델·ZIP·API 요청 테스트와 Playwright PC·모바일 테스트
 
@@ -126,7 +125,7 @@ npm run build
 npx firebase-tools deploy --only hosting:diary --project burndown-studio
 ```
 
-기존 Worker 알림 코드와 날씨 모듈은 보존했으나 새 화면에는 아직 연결하지 않았습니다. 새 화면의 일정은 사용자가 선택해서 가져오는 방식입니다.
+일정은 사용자가 선택해서 가져오는 방식입니다. 날씨 기록과 푸시 알림은 현재 앱에 없습니다.
 
 일기 저장은 Drive API만 사용하며 Sheets API는 더 이상 호출하지 않습니다. 로그인 전 기록은 설정의 **연결 전 기기 기록 가져오기**로 옮깁니다.
 

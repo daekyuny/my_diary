@@ -1,6 +1,5 @@
 import { expect } from '@playwright/test';
-const scope =
-  'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata';
+const scope = 'https://www.googleapis.com/auth/drive.appdata';
 export async function mock(context, state) {
   await context.addInitScript((scope) => {
     window.diaryUploadBodies = [];

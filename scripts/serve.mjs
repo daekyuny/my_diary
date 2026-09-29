@@ -24,9 +24,9 @@ const server = http.createServer(async (request, response) => {
     const pathname = decodeURIComponent(url.pathname);
     const allowed =
       pathname === '/' ||
-      /^\/(index\.html|legacy\.html|sw\.js|config\.json|manifest\.webmanifest)$/.test(pathname) ||
+      /^\/(index\.html|sw\.js|config\.json|manifest\.webmanifest)$/.test(pathname) ||
       /^\/(src|assets)\/[\w./-]+$/.test(pathname) ||
-      ['/vendor/fflate.js', '/vendor/journal-app.js'].includes(pathname);
+      pathname === '/vendor/journal-app.js';
     if (!allowed || pathname.split('/').some((part) => part.startsWith('.'))) {
       response.writeHead(404);
       response.end('Not found');
@@ -34,8 +34,6 @@ const server = http.createServer(async (request, response) => {
     }
     let file = path.resolve(root, `.${pathname === '/' ? '/index.html' : pathname}`);
     if (!file.startsWith(`${root}${path.sep}`)) throw new Error('Invalid path');
-    if (pathname === '/vendor/fflate.js' && root === process.cwd())
-      file = path.resolve('node_modules/fflate/esm/browser.js');
     if (pathname === '/config.json' && root === process.cwd()) {
       try {
         const config = JSON.parse(await readFile('config.local.json', 'utf8'));
@@ -43,7 +41,6 @@ const server = http.createServer(async (request, response) => {
         response.end(
           JSON.stringify({
             googleClientId: config.googleClientId || '',
-            notificationServer: config.notificationServer || '',
             authServer: Boolean(config.authServer),
           }),
         );

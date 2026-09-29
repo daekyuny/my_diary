@@ -28,8 +28,6 @@ dist/
 /artifacts/
 playwright-report/
 test-results/
-.wrangler/
-.dev.vars
 config.local.json
 
 # Personal migration archives (never publish with the app)

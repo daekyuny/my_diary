@@ -50,8 +50,7 @@ import { importArchive, exportArchive } from './transfer.js';
 import { eventsForDate, manualEvent } from './calendar.js';
 import * as store from '../storage.js';
 import * as google from '../google.js';
-import { createPhoto, previewBlob, uploadPhoto, cleanLocalPhotos } from './photos.js';
-import { assetBlob } from '../sync.js';
+import { createPhoto, previewBlob, uploadPhoto, cleanLocalPhotos, assetBlob } from './photos.js';
 
 hydrateIcons();
 let settings = loadSettings();

@@ -4,13 +4,10 @@ import {
   newEntry,
   makeRevision,
   heads,
-  entryGroups,
-  filterGroups,
   mergeEvents,
   calendarEvent,
-  revisionFile,
-  parseRevision,
   markdown,
+  validateRevision,
   validDate,
   localDate,
 } from '../src/model.js';
@@ -31,24 +28,6 @@ test('concurrent changes retain both branches until an explicit merge', () => {
     [merged.id],
   );
   assert.equal(base.entry.body, 'first');
-});
-
-test('sorting uses diary date, and search finds numbers and event notes', () => {
-  const older = makeRevision({
-    ...newEntry('2026-08-01'),
-    body: '계약 번호 001234',
-    tags: ['업무'],
-  });
-  const newer = makeRevision({
-    ...newEntry('2026-09-01'),
-    events: [{ key: 'a', title: '회의', note: '김민수' }],
-  });
-  older.savedAt = '2026-09-09T01:00:00Z';
-  const groups = entryGroups([older, newer]);
-  assert.equal(filterGroups(groups)[0].latest.entry.date, '2026-09-01');
-  assert.equal(filterGroups(groups, { query: '００１２３４', tag: '업무' }).length, 1);
-  assert.equal(filterGroups(groups, { query: '김민수' }).length, 1);
-  assert.equal(filterGroups(groups, { from: '2026-08-02', to: '2026-08-31' }).length, 0);
 });
 
 test('refreshing or deleting a calendar event preserves the diary note and reminder choice', () => {
@@ -77,17 +56,14 @@ test('calendar event identity includes calendar and recurring instance id', () =
   assert.equal(calendarEvent(raw, 'a').allDay, true);
 });
 
-test('portable Markdown round-trips all metadata and resolves image paths', () => {
+test('portable Markdown resolves image paths and rejects unsafe attachments', () => {
   const entry = {
     ...newEntry('2026-09-09'),
     title: '메모',
     body: '이름 **홍길동**\n![사진](diary-image:photo-1)',
     images: [{ id: 'photo-1', name: '사진.png', type: 'image/png' }],
   };
-  const revision = makeRevision(entry);
-  assert.deepEqual(parseRevision(revisionFile(revision)), revision);
   assert.match(markdown(entry), /attachments\/photo-1.png/);
-  assert.throws(() => parseRevision('not a backup'));
   assert.throws(() =>
     makeRevision({ ...entry, images: [{ id: '../escape', name: 'x', type: 'image/svg+xml' }] }),
   );
@@ -100,11 +76,13 @@ test('dates reject calendar overflow and stay local', () => {
   assert.equal(localDate(local), '2026-09-09');
 });
 
-test('invalid backup metadata is rejected before it can break rendering', () => {
+test('invalid revision metadata is rejected before it can break rendering', () => {
   const revision = makeRevision(newEntry('2026-09-09'));
-  assert.throws(() => parseRevision(revisionFile({ ...revision, id: undefined })));
-  assert.throws(() => parseRevision(revisionFile({ ...revision, savedAt: 123 })));
-  assert.throws(() => parseRevision(revisionFile({ ...revision, parents: [revision.id] })));
+  const roundtrip = (value) => validateRevision(JSON.parse(JSON.stringify(value)));
+  assert.deepEqual(roundtrip(revision), revision);
+  assert.throws(() => roundtrip({ ...revision, id: undefined }));
+  assert.throws(() => roundtrip({ ...revision, savedAt: 123 }));
+  assert.throws(() => roundtrip({ ...revision, parents: [revision.id] }));
   assert.throws(() =>
     makeRevision({ ...revision.entry, weather: { date: '2026-09-09', location: null } }),
   );

@@ -1,7 +1,17 @@
 import * as store from '../storage.js';
 import { uploadPrivateAsset } from './appdata.js';
-import { assetBlob } from '../sync.js';
+import * as google from '../google.js';
 
+// Prefer the device copy; otherwise download from Drive and keep thumbnails cached locally.
+export async function assetBlob(image) {
+  const asset = await store.get('assets', image.id);
+  if (asset?.blob) return asset.blob;
+  if (!image.driveId) throw new Error(`이미지 원본을 찾을 수 없습니다: ${image.name}`);
+  const blob = await google.downloadAsset(image.driveId);
+  if (image.storage !== 'appDataFolder' || image.id.endsWith('-thumbnail'))
+    await store.put('assets', { ...image, blob, accessedAt: Date.now() });
+  return blob;
+}
 export async function makeThumbnail(blob, id) {
   const url = URL.createObjectURL(blob);
   try {

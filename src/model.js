@@ -140,34 +140,6 @@ export function entryGroups(revisions) {
   }));
 }
 
-export function filterGroups(
-  groups,
-  { query = '', tag = '', from = '', to = '', order = 'desc' } = {},
-) {
-  const needle = query.normalize('NFKC').toLocaleLowerCase();
-  return groups
-    .filter(({ latest: { entry } }) => {
-      const text = [
-        entry.title,
-        entry.body,
-        ...entry.tags,
-        ...entry.events.flatMap((e) => [e.title, e.note]),
-      ]
-        .join('\n')
-        .normalize('NFKC')
-        .toLocaleLowerCase();
-      return (
-        text.includes(needle) &&
-        (!tag || entry.tags.includes(tag)) &&
-        (!from || entry.date >= from) &&
-        (!to || entry.date <= to)
-      );
-    })
-    .sort(
-      (a, b) => (order === 'asc' ? 1 : -1) * a.latest.entry.date.localeCompare(b.latest.entry.date),
-    );
-}
-
 export function mergeEvents(existing, incoming, removedKeys = []) {
   const next = new Map(
     incoming.filter((event) => !removedKeys.includes(event.key)).map((event) => [event.key, event]),
@@ -203,10 +175,6 @@ export function calendarEvent(event, calendarId) {
     remind: !event.start?.date,
     missing: false,
   };
-}
-
-export function eventDate(event) {
-  return event.allDay ? event.start : localDate(new Date(event.start));
 }
 
 export function imageFileName(image) {
@@ -248,32 +216,4 @@ export function markdown(entry) {
         `![${image.name.replace(/[\[\]]/g, '')}](attachments/${imageFileName(image)})`,
       );
   return `${lines.join('\n').trim()}\n`;
-}
-
-export function revisionFile(revision) {
-  const portable = {
-    schemaVersion: revision.schemaVersion,
-    id: revision.id,
-    parents: revision.parents,
-    savedAt: revision.savedAt,
-    entry: revision.entry,
-  };
-  return `---\n${JSON.stringify(portable, null, 2)}\n---\n\n${markdown(revision.entry)}`;
-}
-
-export function parseRevision(text) {
-  const match = /^---\n([\s\S]*?)\n---\n/.exec(text);
-  if (!match) throw new Error('일기 메타데이터가 없습니다.');
-  return validateRevision(JSON.parse(match[1]));
-}
-
-export function weatherLabel(code) {
-  if (code === 0) return '맑음';
-  if (code <= 3) return '구름 조금 / 흐림';
-  if (code <= 48) return '안개';
-  if (code <= 67) return '비';
-  if (code <= 77) return '눈';
-  if (code <= 82) return '소나기';
-  if (code <= 86) return '눈 소나기';
-  return '뇌우';
 }

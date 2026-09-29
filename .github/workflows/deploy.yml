@@ -74,7 +74,6 @@ jobs:
       - name: Write public app configuration
         env:
           GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
-          NOTIFICATION_SERVER: ${{ vars.NOTIFICATION_SERVER }}
           DIARY_AUTH_ENABLED: ${{ vars.DIARY_AUTH_ENABLED }}
         run: |
           node --input-type=module <<'NODE'
@@ -82,7 +81,6 @@ jobs:
           const config = JSON.parse(await readFile('config.json', 'utf8'));
           await writeFile('config.local.json', JSON.stringify({
             googleClientId: process.env.GOOGLE_CLIENT_ID || config.googleClientId || '',
-            notificationServer: process.env.NOTIFICATION_SERVER || config.notificationServer || '',
             authServer: process.env.DIARY_AUTH_ENABLED === 'true',
           }));
           if (process.env.DIARY_AUTH_ENABLED === 'true') {
