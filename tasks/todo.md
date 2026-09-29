@@ -1,0 +1,22 @@
+# 이슈 1~4 진행 계획 (2026-09-30)
+
+## 계획
+
+- [x] #1 상단 압축: 모바일에서 한 줄 문구 숨김, 클라우드 배너 한 줄로 축소, 여백 축소
+- [x] #2 오늘 미작성일 때만 "오늘 기록 남기기 →" 한 줄 표시 (`quickEntryVisible` 순수 함수 + 단위 테스트)
+- [x] #3 목록 카드의 삭제 버튼 제거, 읽기 모드 하단에 삭제하기/복원하기 표시 (즉시 실행)
+- [x] #4 휴지통 이동 후 되돌리기 토스트, `window.confirm` 두 곳을 `#small-dialog` 확인창으로 교체
+- [x] 브라우저 테스트 갱신·추가, 단위 테스트 갱신
+- [x] `npm test`(37 통과), `npm run test:e2e`(38 통과), `npm run format:check`, `git diff --check`, `npm run build`
+
+## 검토
+
+- iPhone 13 뷰포트(390×664)에서 배너와 오늘 줄이 모두 보여도 첫 카드 하단(598px)이 하단 탐색(601px) 위에 들어온다. 캡처 테스트가 이를 검증한다.
+- 되돌리기 토스트가 보이는 동안 "클라우드에 저장했습니다" 같은 일반 안내는 토스트를 덮지 않는다(오류·다른 액션 토스트는 덮는다).
+- 이 PC의 Playwright Chromium은 `libnspr4`·`libnss3`가 없어 실행되지 않았다. sudo 없이 두 패키지를 scratchpad에 풀고 `LD_LIBRARY_PATH`로 실행했다. 영구 해결은 `sudo npx playwright install-deps chromium`.
+- 커밋·배포는 하지 않았다.
+
+## 추가 검토 (시스템 라이브러리 설치 후)
+
+- `libnspr4`·`libnss3`와 함께 CJK 폰트가 설치되어 한글 글자 높이가 늘었고 첫 카드가 하단 탐색을 13px 넘쳤다. 상단바·제목·필터·카드 여백을 더 줄여 첫 카드 하단 590px, 하단 탐색 599px로 맞췄다.
+- `updates.spec.js`의 "manual update discovers a new build" 테스트는 30초 타임아웃으로 간헐적으로 실패한다. origin/main 작업 트리에서도 6회 중 1회 실패해 이번 변경과 무관한 기존 불안정 테스트다.
