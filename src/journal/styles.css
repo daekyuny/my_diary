@@ -485,42 +485,27 @@ main {
 .connect-banner button svg {
   width: 14px;
 }
+/* One-line nudge shown only while today's diary is missing. */
 .quick-entry {
-  display: flex;
-  width: 100%;
-  text-align: left;
-  justify-content: flex-start;
-  gap: 17px;
-  border: 1px solid #e0e4d7;
-  padding: 22px 25px;
-  background: #fffefa;
-  border-radius: 10px;
-  box-shadow: 0 3px 10px #4f604708;
-  margin-bottom: 26px;
+  gap: 10px;
+  padding: 6px 4px;
+  margin: -6px 0 18px;
+  font-size: 13px;
+  font-weight: 550;
+  color: #567149;
 }
 .quick-plus {
-  width: 38px;
-  height: 38px;
+  width: 24px;
+  height: 24px;
   background: #eff3e7;
   border-radius: 50%;
   color: #79956b;
 }
 .quick-plus svg {
-  width: 20px;
-}
-.quick-entry strong {
-  display: block;
-  font-size: 14px;
-  font-weight: 550;
-}
-.quick-entry div > span {
-  display: block;
-  font-size: 11px;
-  color: #879578;
-  margin-top: 7px;
+  width: 14px;
+  height: 14px;
 }
 .quick-end {
-  margin-left: auto;
   color: #a7b099;
 }
 .quick-end svg {
@@ -1612,24 +1597,9 @@ dialog::backdrop {
     min-height: 30px;
   }
   .quick-entry {
-    padding: 18px 16px;
-    gap: 13px;
-    margin-bottom: 20px;
-  }
-  .quick-plus {
-    width: 32px;
-    height: 32px;
-  }
-  .quick-plus svg {
-    width: 17px;
-    height: 17px;
-  }
-  .quick-entry strong {
     font-size: 12px;
-  }
-  .quick-entry div > span {
-    font-size: 9px;
-    margin-top: 6px;
+    min-height: 36px;
+    margin: -2px 0 10px;
   }
   .quick-end svg {
     width: 15px;

@@ -33,7 +33,7 @@ export function pageDescription(collection) {
       : '평범한 하루에도, 기억하고 싶은 순간은 있으니까.';
 }
 export function quickLabel(view, day) {
-  return view === 'calendar' && day ? `${day}에 새 기록 남기기` : '오늘은 어떤 하루였나요?';
+  return view === 'calendar' && day ? `${day}에 새 기록 남기기` : '오늘 기록 남기기';
 }
 export function weekday(date) {
   return new Date(`${date}T12:00:00`).toLocaleDateString('ko-KR', { weekday: 'long' });

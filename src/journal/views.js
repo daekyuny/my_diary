@@ -72,6 +72,13 @@ export function cards(groups, view, hasFilter = false) {
     })
     .join('');
 }
+// The "write today" line only nudges while today's diary is missing; a day picked in the
+// calendar keeps it as the way to add a record for that day.
+export function quickEntryVisible(groups, { collection, view, day, today = localDate() }) {
+  if (collection !== 'journal') return false;
+  if (view === 'calendar' && day) return true;
+  return !groups.some(({ latest: { entry } }) => !entry.archived && entry.date === today);
+}
 export function calendarHTML(month, day, groups) {
   const [year, m] = month.split('-').map(Number),
     counts = new Map();

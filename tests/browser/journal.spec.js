@@ -86,6 +86,27 @@ test('pin and archive remain editable and body HTML never executes', async ({ pa
   expect(await page.evaluate(() => window.hacked)).toBeUndefined();
 });
 
+test('today prompt shows only until today has a diary', async ({ page }) => {
+  page.on('dialog', (dialog) => {
+    throw new Error(`unexpected browser dialog: ${dialog.message()}`);
+  });
+  await expect(page.locator('#quick-entry')).toBeVisible();
+  await expect(page.locator('#quick-label')).toHaveText('오늘 기록 남기기');
+  await newEntry(page);
+  await page.locator('#entry-title').fill('오늘의 기록');
+  await saveClose(page);
+  await expect(page.locator('#quick-entry')).toBeHidden();
+  await page.locator('[data-collection=archive]:visible').click();
+  await expect(page.locator('#quick-entry')).toBeHidden();
+  await page.locator('[data-collection=journal]:visible').click();
+  await page.getByRole('button', { name: '캘린더 보기', exact: true }).click();
+  await expect(page.locator('#quick-entry')).toBeHidden();
+  await page.locator('#calendar-month').fill('2026-08');
+  await page.locator('[data-day="2026-08-07"]').click();
+  await expect(page.locator('#quick-entry')).toBeVisible();
+  await expect(page.locator('#quick-label')).toHaveText('2026-08-07에 새 기록 남기기');
+});
+
 test('journal design captures populated list, cards, calendar and editor', async ({
   page,
 }, info) => {

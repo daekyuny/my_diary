@@ -17,6 +17,7 @@ import {
   conflictHTML,
   calendarChoiceHTML,
   repositoryOptionsHTML,
+  quickEntryVisible,
 } from './views.js';
 import {
   connectionLabel,
@@ -235,6 +236,7 @@ function render() {
   $('#page-title').innerHTML = pageTitle(collection, view) + '<span class="title-dot">.</span>';
   $('#page-description').textContent = pageDescription(collection);
   $('#quick-label').textContent = quickLabel(view, day);
+  $('#quick-entry').hidden = !quickEntryVisible(groups, { collection, view, day });
   $('#calendar').hidden = view !== 'calendar';
   if (view === 'calendar')
     $('#calendar').innerHTML = calendarHTML(month, day, visibleGroups(groups, base));

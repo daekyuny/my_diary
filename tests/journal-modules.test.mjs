@@ -13,6 +13,7 @@ import {
   eventsHTML,
   eventTime,
   repositoryOptionsHTML,
+  quickEntryVisible,
 } from '../src/journal/views.js';
 import { batches } from '../src/journal/cloud-sync.js';
 import { nextRevision } from '../src/journal/current.js';
@@ -59,7 +60,28 @@ test('save state label reflects dirty edits, conflicts, cloud and device saves',
   assert.equal(pageTitle('journal', 'calendar'), '날짜로 보는 기록');
   assert.equal(pageTitle('archive', 'list'), '삭제한 기록');
   assert.equal(quickLabel('calendar', '2026-09-29'), '2026-09-29에 새 기록 남기기');
+  assert.equal(quickLabel('list', ''), '오늘 기록 남기기');
   assert.equal(characterCount('a'.repeat(1234)), '1,234자');
+});
+
+test('today prompt hides once today has a diary and in other collections', () => {
+  const group = (date, archived = false) => ({
+    latest: { entry: { ...newEntry(date), archived }, sheetSaved: true },
+    heads: [],
+  });
+  const today = '2026-09-30',
+    base = { collection: 'journal', view: 'list', day: '', today };
+  assert.equal(quickEntryVisible([], base), true);
+  assert.equal(quickEntryVisible([group('2026-09-29')], base), true);
+  assert.equal(quickEntryVisible([group(today)], base), false);
+  assert.equal(quickEntryVisible([group(today, true)], base), true);
+  assert.equal(quickEntryVisible([], { ...base, collection: 'archive' }), false);
+  assert.equal(quickEntryVisible([], { ...base, collection: 'pinned' }), false);
+  assert.equal(quickEntryVisible([group(today)], { ...base, view: 'calendar' }), false);
+  assert.equal(
+    quickEntryVisible([group(today)], { ...base, view: 'calendar', day: '2026-09-01' }),
+    true,
+  );
 });
 
 test('editor HTML escapes user content and hides events when the template is off', () => {
