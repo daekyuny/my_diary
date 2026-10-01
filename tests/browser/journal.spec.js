@@ -127,6 +127,7 @@ test('reading mode steps through the shown list, hides the count and follows the
   await page.locator('#entry-body').press('ArrowRight');
   await expect(page.locator('#entry-title')).toHaveValue('둘째 날');
   await page.locator('#close-editor').click();
+  await expect(page.locator('#editor-dialog')).not.toBeVisible();
   // The search narrows what the arrows walk through.
   await page.locator('#search').fill('첫째');
   await expect(page.locator('.record')).toHaveCount(1);
@@ -137,6 +138,7 @@ test('reading mode steps through the shown list, hides the count and follows the
     .locator('#reading-body')
     .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
   await page.locator('#close-editor').click();
+  await expect(page.locator('#editor-dialog')).not.toBeVisible();
   await settings(page);
   await page.locator('#text-size').selectOption('large');
   await page.locator('#close-settings').click();
