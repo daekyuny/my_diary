@@ -10,3 +10,8 @@
 
 - 상황: 기능 커밋 8개 위에 문서 커밋을 `[skip ci]`로 올렸다. GitHub은 push의 맨 위 커밋 메시지에 `[skip ci]`가 있으면 그 push 전체의 워크플로를 건너뛰므로 기능 커밋이 배포되지 않을 뻔했다.
 - 규칙: 워크플로에 `paths-ignore`(`**.md`, `docs/**`, `tasks/**`, `.claude/**`)가 생겼으므로 문서 커밋에 `[skip ci]`를 붙이지 않는다.
+
+## 2026-10-01 · `grep`으로 끝나는 `&&` 체인이 실패한 e2e를 통과로 넘겼다
+
+- 상황: `npm run test:e2e | grep ... && git commit && git push`로 묶었더니 grep이 "1 failed" 줄을 찾아 성공으로 끝나 실패한 채 push됐다.
+- 규칙: 테스트 결과는 종료 코드로 판단한다. 출력은 파일로 남기고 `echo "exit $?"`를 확인한 뒤 커밋·push를 별도 단계로 실행한다.
