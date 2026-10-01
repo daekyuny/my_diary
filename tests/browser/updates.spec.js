@@ -130,7 +130,9 @@ test('installed app checks updates on resume and preserves unsaved text before a
     await page.locator('.record').click();
     await expect(page.locator('#reading-body')).toContainText('아직 저장을 누르지 않은 내용');
   } finally {
-    await page.goto('about:blank');
+    // Closing the page releases the service worker client before the fixture server stops;
+    // navigating to about:blank instead sometimes never finished loading under load.
+    await page.close();
     await site.close();
   }
 });
@@ -140,9 +142,6 @@ test('manual update discovers a new build and offline checks keep the current ap
   context,
   browserName,
 }, info) => {
-  // Installing a second service worker waits up to 25 s on a busy runner; leave room for the
-  // offline check after it.
-  test.setTimeout(60000);
   const site = await fixture();
   try {
     await page.route('https://accounts.google.com/**', (r) => r.abort());
@@ -164,7 +163,9 @@ test('manual update discovers a new build and offline checks keep the current ap
       await context.setOffline(false);
     }
   } finally {
-    await page.goto('about:blank');
+    // Closing the page releases the service worker client before the fixture server stops;
+    // navigating to about:blank instead sometimes never finished loading under load.
+    await page.close();
     await site.close();
   }
 });
