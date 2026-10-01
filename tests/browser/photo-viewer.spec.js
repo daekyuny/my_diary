@@ -6,6 +6,8 @@ async function open(page) {
   await page.goto('/');
   await expect(page.locator('#quick-entry')).toBeEnabled();
   await page.locator('#quick-entry').click();
+  // Attaching while the editor is still opening is ignored, so wait until it is ready.
+  await expect(page.locator('#entry-title')).toBeFocused();
   const bytes = await page.evaluate(async () => {
     const canvas = document.createElement('canvas');
     canvas.width = 2400;
@@ -248,6 +250,8 @@ test('camera photos are stored at 2048px upright, unless the original setting is
   // Orientation 6: stored landscape, shown portrait.
   const photo = await cameraJPEG(page, 3000, 1000, 6);
   await page.locator('#quick-entry').click();
+  // Attaching while the editor is still opening is ignored, so wait until it is ready.
+  await expect(page.locator('#entry-title')).toBeFocused();
   await page
     .locator('#photo-input')
     .setInputFiles({ name: 'IMG_0001.jpg', mimeType: 'image/jpeg', buffer: photo });
@@ -270,6 +274,8 @@ test('camera photos are stored at 2048px upright, unless the original setting is
   await page.locator('#photo-quality').selectOption('original');
   await page.locator('#close-settings').click();
   await page.locator('#quick-entry').click();
+  // Attaching while the editor is still opening is ignored, so wait until it is ready.
+  await expect(page.locator('#entry-title')).toBeFocused();
   await page
     .locator('#photo-input')
     .setInputFiles({ name: 'IMG_0002.jpg', mimeType: 'image/jpeg', buffer: photo });

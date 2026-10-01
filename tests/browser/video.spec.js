@@ -35,6 +35,8 @@ test('videos attach with a frame preview, play in their own viewer and count on 
   await expect(page.locator('#quick-entry')).toBeEnabled();
   const clip = await recordClip(page);
   await page.locator('#quick-entry').click();
+  // Attaching while the editor is still opening is ignored, so wait until it is ready.
+  await expect(page.locator('#entry-title')).toBeFocused();
   await page.locator('#entry-title').fill('움직이는 하루');
   await page
     .locator('#photo-input')
@@ -66,6 +68,8 @@ test('a video this browser cannot decode keeps a placeholder and stays downloada
   await page.goto('/');
   await expect(page.locator('#quick-entry')).toBeEnabled();
   await page.locator('#quick-entry').click();
+  // Attaching while the editor is still opening is ignored, so wait until it is ready.
+  await expect(page.locator('#entry-title')).toBeFocused();
   await page.locator('#photo-input').setInputFiles({
     name: 'IMG_0001.MOV',
     mimeType: 'video/quicktime',
@@ -82,6 +86,8 @@ test('unsupported attachment types are refused with a message', async ({ page })
   await page.goto('/');
   await expect(page.locator('#quick-entry')).toBeEnabled();
   await page.locator('#quick-entry').click();
+  // Attaching while the editor is still opening is ignored, so wait until it is ready.
+  await expect(page.locator('#entry-title')).toBeFocused();
   await page
     .locator('#photo-input')
     .setInputFiles({ name: 'clip.avi', mimeType: 'video/x-msvideo', buffer: Buffer.alloc(10) });
@@ -100,6 +106,8 @@ test('private storage uploads videos in resumable chunks and plays them from Dri
     await connect(page, true);
     const clip = await recordClip(page);
     await page.locator('#quick-entry').click();
+    // Attaching while the editor is still opening is ignored, so wait until it is ready.
+    await expect(page.locator('#entry-title')).toBeFocused();
     await page.locator('#entry-title').fill('클라우드 동영상');
     await page
       .locator('#photo-input')
