@@ -199,3 +199,82 @@ test('arrow keys pan the open photo instead of turning to another diary', async 
   await action(page, 'close').click();
   await expect(page.locator('#reading-title')).toHaveText('사진 있는 날');
 });
+
+// A JPEG with an EXIF orientation tag, as phones save portrait photos.
+async function cameraJPEG(page, width, height, orientation = 1) {
+  const bytes = await page.evaluate(
+    async ([width, height]) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      for (let x = 0; x < width; x += 50)
+        for (let y = 0; y < height; y += 50) {
+          ctx.fillStyle = `hsl(${(x * 7 + y * 3) % 360} 60% 50%)`;
+          ctx.fillRect(x, y, 50, 50);
+        }
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 1));
+      return Array.from(new Uint8Array(await blob.arrayBuffer()));
+    },
+    [width, height],
+  );
+  const tiff = [0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1];
+  const exif = [0x45, 0x78, 0x69, 0x66, 0, 0, ...tiff, 0, orientation, 0, 0, 0, 0, 0, 0];
+  const app1 = [0xff, 0xe1, (exif.length + 2) >> 8, (exif.length + 2) & 255, ...exif];
+  return Buffer.from([...bytes.slice(0, 2), ...app1, ...bytes.slice(2)]);
+}
+const storedPhoto = (page) =>
+  page.evaluate(async () => {
+    const store = await import('/src/storage.js');
+    await store.openStore('sheets-local');
+    const asset = (await store.all('assets')).find((a) => !a.id.endsWith('-thumbnail'));
+    const bitmap = await createImageBitmap(asset.blob);
+    return {
+      type: asset.type,
+      blobType: asset.blob.type,
+      size: asset.blob.size,
+      width: bitmap.width,
+      height: bitmap.height,
+      bytes: Array.from(new Uint8Array(await asset.blob.arrayBuffer()).slice(0, 64)),
+    };
+  });
+
+test('camera photos are stored at 2048px upright, unless the original setting is chosen', async ({
+  page,
+}) => {
+  await page.route('https://accounts.google.com/**', (r) => r.abort());
+  await page.goto('/');
+  await expect(page.locator('#quick-entry')).toBeEnabled();
+  // Orientation 6: stored landscape, shown portrait.
+  const photo = await cameraJPEG(page, 3000, 1000, 6);
+  await page.locator('#quick-entry').click();
+  await page
+    .locator('#photo-input')
+    .setInputFiles({ name: 'IMG_0001.jpg', mimeType: 'image/jpeg', buffer: photo });
+  await expect(page.locator('.photo-preview img')).toBeVisible();
+  const optimized = await storedPhoto(page);
+  expect(optimized).toMatchObject({ type: 'image/jpeg', width: 683, height: 2048 });
+  expect(optimized.size).toBeLessThan(photo.length);
+  await page.locator('#close-editor').click();
+  await page.locator('#confirm-accept').click();
+  await page.evaluate(async () => {
+    const store = await import('/src/storage.js');
+    await store.openStore('sheets-local');
+    for (const asset of await store.all('assets')) await store.remove('assets', asset.id);
+  });
+  const settingsButton = (await page.locator('#open-settings').isVisible())
+    ? '#open-settings'
+    : '#mobile-settings';
+  await page.locator(settingsButton).click();
+  await expect(page.locator('#photo-quality')).toHaveValue('optimized');
+  await page.locator('#photo-quality').selectOption('original');
+  await page.locator('#close-settings').click();
+  await page.locator('#quick-entry').click();
+  await page
+    .locator('#photo-input')
+    .setInputFiles({ name: 'IMG_0002.jpg', mimeType: 'image/jpeg', buffer: photo });
+  await expect(page.locator('.photo-preview img')).toBeVisible();
+  const original = await storedPhoto(page);
+  expect(original.size).toBe(photo.length);
+  expect(original.bytes).toEqual(Array.from(photo.subarray(0, 64)));
+});

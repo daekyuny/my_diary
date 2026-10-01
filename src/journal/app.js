@@ -592,6 +592,7 @@ function openSettings() {
   $('#setting-client').value = settings.googleClientId || '';
   $('#text-size').value = document.documentElement.dataset.textSize;
   $('#theme').value = document.documentElement.dataset.theme || 'system';
+  $('#photo-quality').value = settings.photoQuality === 'original' ? 'original' : 'optimized';
   connection();
   $('#settings-dialog').showModal();
 }
@@ -997,7 +998,7 @@ $('#add-photo').onclick = () => $('#photo-input').click();
 $('#photo-input').onchange = () =>
   task(async () => {
     for (const file of $('#photo-input').files) {
-      const image = await createPhoto(file);
+      const image = await createPhoto(file, settings.photoQuality);
       entry.images.push(image);
       changed();
     }
@@ -1011,6 +1012,10 @@ $('#open-settings').onclick =
   $('#bottom-settings').onclick =
     openSettings;
 $('#close-settings').onclick = () => $('#settings-dialog').close();
+$('#photo-quality').onchange = (e) => {
+  settings.photoQuality = e.target.value;
+  persistSettings();
+};
 $('#theme').onchange = (e) => {
   settings.theme = e.target.value;
   persistSettings();
