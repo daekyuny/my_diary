@@ -139,9 +139,22 @@ test('reading mode steps through the shown list, hides the count and follows the
     .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
   await page.locator('#close-editor').click();
   await expect(page.locator('#editor-dialog')).not.toBeVisible();
+  const card = () =>
+    page
+      .locator('.record p')
+      .first()
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  const cardBefore = await card();
   await settings(page);
-  await page.locator('#text-size').selectOption('large');
+  const preview = () =>
+    page.locator('.text-size-preview').evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  const before = await preview();
+  await page.locator('#text-size [data-size=large]').click();
+  // The choice shows at once in the preview line and in the list behind the dialog.
+  expect(await preview()).toBeGreaterThan(before);
+  await expect(page.locator('#text-size [value=large]')).toBeChecked();
   await page.locator('#close-settings').click();
+  expect(await card()).toBeGreaterThan(cardBefore);
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-text-size', 'large');
   await page.locator('.record').first().click();

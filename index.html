@@ -345,13 +345,23 @@
               <option value="dark">어둡게</option>
             </select></label
           >
-          <label class="form-label"
-            >읽기 글자 크기<select id="text-size">
-              <option value="small">작게</option>
-              <option value="normal">보통</option>
-              <option value="large">크게</option>
-            </select></label
-          >
+          <fieldset id="text-size" class="text-size-choice">
+            <legend class="form-label">일기 글자 크기</legend>
+            <label data-size="small"
+              ><input type="radio" name="text-size" value="small" /><span aria-hidden="true"
+                >가</span
+              >작게</label
+            ><label data-size="normal"
+              ><input type="radio" name="text-size" value="normal" /><span aria-hidden="true"
+                >가</span
+              >보통</label
+            ><label data-size="large"
+              ><input type="radio" name="text-size" value="large" /><span aria-hidden="true"
+                >가</span
+              >크게</label
+            >
+          </fieldset>
+          <p class="text-size-preview">오늘 기억하고 싶은 순간을 한 줄 남겨보세요.</p>
           <p class="muted">테마와 글자 크기는 이 기기에만 적용됩니다.</p>
         </section>
         <section>

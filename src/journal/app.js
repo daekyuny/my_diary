@@ -611,7 +611,7 @@ async function closeEditor() {
 }
 function openSettings() {
   $('#setting-client').value = settings.googleClientId || '';
-  $('#text-size').value = document.documentElement.dataset.textSize;
+  $(`[name=text-size][value=${document.documentElement.dataset.textSize}]`).checked = true;
   $('#theme').value = document.documentElement.dataset.theme || 'system';
   $('#photo-quality').value = settings.photoQuality === 'original' ? 'original' : 'optimized';
   connection();
@@ -1042,6 +1042,7 @@ $('#theme').onchange = (e) => {
   persistSettings();
   applyDisplay();
 };
+// Each choice applies at once; the preview line under it and the list behind show the size.
 $('#text-size').onchange = (e) => {
   settings.textSize = e.target.value;
   persistSettings();
