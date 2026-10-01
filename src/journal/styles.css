@@ -2581,7 +2581,11 @@ dialog > .dialog-header {
   }
 }
 
-/* Search matches in cards and in the reading view. */
+/* Search matches in cards and in the reading view. The first match in an opened diary takes
+   the focus so the view starts there; it needs no ring. */
+mark:focus {
+  outline: none;
+}
 mark {
   background: var(--mark);
   color: inherit;

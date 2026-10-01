@@ -237,6 +237,7 @@ test('search marks matches in cards and scrolls the opened diary to the first ma
   const first = page.locator('#reading-body mark').first();
   await expect(first).toHaveText('호숫가');
   await expect(first).toBeInViewport();
+  await expect(first).toBeFocused();
   // The URL stays one working link even though the query appears inside it.
   await expect(page.locator('#reading-body a')).toHaveCount(1);
   await expect(page.locator('#reading-body a mark')).toHaveText('호숫가');
@@ -292,7 +293,8 @@ test('theme follows the system unless the device setting forces light or dark', 
 test('focus rings stay inside fields, iOS skips input zoom and the settings close stays in reach', async ({
   page,
 }, info) => {
-  const mobile = info.project.name === 'mobile-chromium';
+  // iPhone projects (Chromium and WebKit) carry an iPhone user agent; desktop does not.
+  const mobile = Boolean(info.project.use.isMobile);
   // The iPhone user agent gets maximum-scale so tapping a small field does not zoom the page.
   expect(await page.locator('meta[name=viewport]').getAttribute('content')).toContain(
     mobile ? 'maximum-scale=1' : 'viewport-fit',

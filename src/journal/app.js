@@ -162,7 +162,10 @@ async function task(fn) {
     busy = false;
     locks(false);
     connection();
-    if (desiredFocus && $('#editor-dialog').open) desiredFocus.focus({ preventScroll: true });
+    if (desiredFocus && $('#editor-dialog').open) {
+      desiredFocus.focus({ preventScroll: true });
+      if (desiredFocus.matches('mark')) desiredFocus.scrollIntoView({ block: 'center' });
+    }
     desiredFocus = null;
     if (closeRequested) {
       closeRequested = false;
@@ -447,15 +450,15 @@ async function openEntry(id, date = day || localDate()) {
   fillEditor();
   if (!$('#editor-dialog').open) $('#editor-dialog').showModal();
   desiredFocus = editing ? $('#entry-title') : $('#edit-entry');
-  // A diary opened from a search starts at its first match; any other starts at the top.
-  // The match is revealed on the next frame, after the task focuses the edit button: WebKit
-  // scrolls a focused element into view even with preventScroll.
+  // A diary opened from a search starts at its first match, which also takes the focus:
+  // WebKit scrolls back to whatever element is focused, so the match must be that element.
+  // Any other diary starts at the top with the edit button focused.
   $('#editor-dialog').scrollTop = 0;
-  const opened = entry.id;
-  requestAnimationFrame(() => {
-    const match = entry?.id === opened && !editing && $('#entry-reading mark');
-    if (match) match.scrollIntoView({ block: 'center' });
-  });
+  const match = !editing && $('#entry-reading mark');
+  if (match) {
+    match.tabIndex = -1;
+    desiredFocus = match;
+  }
 }
 function renderReading() {
   $('#resolve-conflict').hidden = !conflictingRevision;
@@ -516,7 +519,8 @@ function moveEntry(step, trigger = null) {
   task(async () => {
     await openEntry(id);
     const after = readingPosition(shownGroups(), id);
-    if (trigger && (step < 0 ? after.previous : after.next)) desiredFocus = trigger;
+    if (trigger && !desiredFocus?.matches('mark') && (step < 0 ? after.previous : after.next))
+      desiredFocus = trigger;
   });
 }
 $('#prev-entry').onclick = (e) => moveEntry(-1, e.currentTarget);
