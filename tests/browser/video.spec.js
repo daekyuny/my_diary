@@ -3,29 +3,32 @@ import { mock, state, connect, device } from './appdata-helpers.js';
 
 test.use({ serviceWorkers: 'block' });
 // Records a short WebM clip from an animated canvas, as a phone camera file stands in.
-async function recordClip(page) {
+async function recordClip(page, width = 320, height = 180) {
   return Buffer.from(
-    await page.evaluate(async () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 320;
-      canvas.height = 180;
-      const ctx = canvas.getContext('2d');
-      const recorder = new MediaRecorder(canvas.captureStream(30), { mimeType: 'video/webm' });
-      const chunks = [];
-      recorder.ondataavailable = (e) => chunks.push(e.data);
-      const done = new Promise((resolve) => (recorder.onstop = resolve));
-      recorder.start();
-      for (let frame = 0; frame < 24; frame++) {
-        ctx.fillStyle = `hsl(${frame * 15} 70% 50%)`;
-        ctx.fillRect(0, 0, 320, 180);
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(160, 0, 160, 180);
-        await new Promise((resolve) => setTimeout(resolve, 40));
-      }
-      recorder.stop();
-      await done;
-      return Array.from(new Uint8Array(await new Blob(chunks).arrayBuffer()));
-    }),
+    await page.evaluate(
+      async ([width, height]) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        const recorder = new MediaRecorder(canvas.captureStream(30), { mimeType: 'video/webm' });
+        const chunks = [];
+        recorder.ondataavailable = (e) => chunks.push(e.data);
+        const done = new Promise((resolve) => (recorder.onstop = resolve));
+        recorder.start();
+        for (let frame = 0; frame < 24; frame++) {
+          ctx.fillStyle = `hsl(${frame * 15} 70% 50%)`;
+          ctx.fillRect(0, 0, width, height);
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(width / 2, 0, width / 2, height);
+          await new Promise((resolve) => setTimeout(resolve, 40));
+        }
+        recorder.stop();
+        await done;
+        return Array.from(new Uint8Array(await new Blob(chunks).arrayBuffer()));
+      },
+      [width, height],
+    ),
   );
 }
 
@@ -75,6 +78,29 @@ test('videos attach with a frame preview, play in their own viewer and count on 
   await expect(page.locator('#video-dialog')).not.toBeVisible();
   await expect(page.locator('#reading-title')).toHaveText('움직이는 하루');
   await expect(video).not.toHaveAttribute('src');
+});
+
+test('portrait videos fit the viewer with their controls in view', async ({ page }, info) => {
+  await page.route('https://accounts.google.com/**', (r) => r.abort());
+  await page.goto('/');
+  await expect(page.locator('#quick-entry')).toBeEnabled();
+  test.skip(!(await page.evaluate(() => 'MediaRecorder' in window)), 'no MediaRecorder');
+  const clip = await recordClip(page, 720, 1280);
+  await page.locator('#quick-entry').click();
+  await expect(page.locator('#entry-title')).toBeFocused();
+  await page
+    .locator('#photo-input')
+    .setInputFiles({ name: 'portrait.webm', mimeType: 'video/webm', buffer: clip });
+  await page.locator('.video-preview').click();
+  const video = page.locator('#video-dialog video');
+  await expect.poll(() => video.evaluate((el) => el.videoHeight)).toBe(1280);
+  const stage = await page.locator('#video-dialog .video-stage').boundingBox();
+  const box = await video.boundingBox();
+  // The whole element, and so its native controls along the bottom, sits inside the stage.
+  expect(box.y).toBeGreaterThanOrEqual(stage.y - 1);
+  expect(box.y + box.height).toBeLessThanOrEqual(stage.y + stage.height + 1);
+  expect(box.x + box.width).toBeLessThanOrEqual(stage.x + stage.width + 1);
+  await page.screenshot({ path: `artifacts/video-portrait-${info.project.name}.png` });
 });
 
 test('a video this browser cannot decode keeps a placeholder and stays downloadable', async ({

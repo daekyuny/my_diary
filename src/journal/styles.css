@@ -2624,7 +2624,11 @@ mark {
   display: grid;
   place-items: center;
 }
+/* Pinned to the stage: a percentage height inside an auto grid row would let a portrait video
+   grow to its own height and push the native controls out of view. */
 .video-stage video {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: contain;
