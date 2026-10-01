@@ -443,9 +443,14 @@ async function openEntry(id, date = day || localDate()) {
   if (!$('#editor-dialog').open) $('#editor-dialog').showModal();
   desiredFocus = editing ? $('#entry-title') : $('#edit-entry');
   // A diary opened from a search starts at its first match; any other starts at the top.
-  const match = !editing && $('#entry-reading mark');
-  if (match) match.scrollIntoView({ block: 'center' });
-  else $('#editor-dialog').scrollTop = 0;
+  // The match is revealed on the next frame, after the task focuses the edit button: WebKit
+  // scrolls a focused element into view even with preventScroll.
+  $('#editor-dialog').scrollTop = 0;
+  const opened = entry.id;
+  requestAnimationFrame(() => {
+    const match = entry?.id === opened && !editing && $('#entry-reading mark');
+    if (match) match.scrollIntoView({ block: 'center' });
+  });
 }
 function renderReading() {
   $('#resolve-conflict').hidden = !conflictingRevision;
