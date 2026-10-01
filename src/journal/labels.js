@@ -55,4 +55,12 @@ export function todayLabel(now = new Date()) {
     weekday: 'long',
   });
 }
+// Video length as shown on its preview: 0:07, 3:25, 1:02:03.
+export function durationLabel(seconds = 0) {
+  const s = Math.max(0, Math.round(seconds)),
+    h = Math.floor(s / 3600),
+    m = Math.floor((s % 3600) / 60),
+    pad = (n) => String(n).padStart(2, '0');
+  return h ? `${h}:${pad(m)}:${pad(s % 60)}` : `${m}:${pad(s % 60)}`;
+}
 export const characterCount = (body) => `${body.length.toLocaleString()}자`;

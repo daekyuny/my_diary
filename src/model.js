@@ -26,6 +26,18 @@ export function newEntry(date = localDate()) {
   };
 }
 
+// Attachments live in `entry.images` for compatibility; videos are attachments too.
+export const ATTACHMENT_EXTENSIONS = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+};
+export const isVideo = (attachment) => /^video\//.test(attachment?.type || '');
+
 export function validateEntry(entry) {
   if (
     !entry ||
@@ -58,10 +70,10 @@ export function validateEntry(entry) {
       (img) =>
         /^[\w-]{1,100}$/.test(img.id) &&
         typeof img.name === 'string' &&
-        /^image\/(jpeg|png|webp|gif)$/.test(img.type),
+        Object.hasOwn(ATTACHMENT_EXTENSIONS, img.type),
     )
   )
-    throw new Error('지원하지 않는 첨부 이미지입니다.');
+    throw new Error('지원하지 않는 첨부 파일입니다.');
   if (
     !entry.events.every(
       (event) =>
@@ -178,10 +190,7 @@ export function calendarEvent(event, calendarId) {
 }
 
 export function imageFileName(image) {
-  const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }[
-    image.type
-  ];
-  return `${image.id}.${ext}`;
+  return `${image.id}.${ATTACHMENT_EXTENSIONS[image.type]}`;
 }
 
 export function markdown(entry) {

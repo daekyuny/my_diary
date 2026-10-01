@@ -4,7 +4,8 @@ import { parseArchive, stableKeepIds, makeBackup } from './backup.js';
 import { assetBlob } from './photos.js';
 // Import a My Diary or Keep ZIP into the device store. Returns how many records were new.
 export async function importArchive(file) {
-  if (file.size > 100 * 1024 * 1024) throw new Error('100MB 이하 ZIP을 선택해주세요.');
+  // Backups carry video originals, so the limit matches the unpacked-size limit in backup.js.
+  if (file.size > 1024 * 1024 * 1024) throw new Error('1GB 이하 ZIP을 선택해주세요.');
   const parsed = parseArchive(new Uint8Array(await file.arrayBuffer()));
   await stableKeepIds(parsed.revisions);
   const existing = new Set((await store.all('revisions')).map((r) => r.id));

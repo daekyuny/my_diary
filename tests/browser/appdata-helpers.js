@@ -60,6 +60,44 @@ export async function mock(context, state) {
           .map(({ bytes, ...f }) => f),
       });
     }
+    if (url.pathname === '/upload/drive/v3/files' && url.searchParams.has('upload_id')) {
+      // Resumable chunk: 308 until the last byte arrives, then the file like a multipart upload.
+      const captured = await request.frame().evaluate(() => window.diaryUploadBodies.shift());
+      const session = state.sessions.get(url.searchParams.get('upload_id'));
+      const range = /bytes (\d+)-(\d+)\/(\d+)/.exec(request.headers()['content-range']);
+      expect(Number(range[1])).toBe(session.bytes.length);
+      session.bytes = Buffer.concat([
+        session.bytes,
+        request.postDataBuffer() || Buffer.from(captured),
+      ]);
+      if (session.bytes.length < Number(range[3])) return route.fulfill({ status: 308 });
+      const id = `private-${++state.next}`;
+      state.files.set(id, {
+        ...session.metadata,
+        id,
+        createdTime: new Date().toISOString(),
+        bytes: session.bytes,
+      });
+      state.log.push(id);
+      return send({ id, sha256Checksum: createHash('sha256').update(session.bytes).digest('hex') });
+    }
+    if (
+      url.pathname === '/upload/drive/v3/files' &&
+      url.searchParams.get('uploadType') === 'resumable'
+    ) {
+      const metadata = JSON.parse(request.postData());
+      expect(metadata.parents).toEqual(['appDataFolder']);
+      const uploadId = String(state.sessions.size + 1);
+      metadata.mimeType = request.headers()['x-upload-content-type'];
+      state.sessions.set(uploadId, { metadata, bytes: Buffer.alloc(0) });
+      return route.fulfill({
+        json: {},
+        headers: {
+          location: `https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&upload_id=${uploadId}`,
+          'access-control-expose-headers': 'Location',
+        },
+      });
+    }
     if (url.pathname === '/upload/drive/v3/files') {
       // Consume every attempt, including failures, to keep WebKit's Blob capture aligned.
       const captured = await request.frame().evaluate(() => window.diaryUploadBodies.shift());
@@ -90,13 +128,20 @@ export async function mock(context, state) {
       if (!file) return route.fulfill({ status: 404, json: { error: { message: 'missing' } } });
       return route.fulfill({
         body: file.bytes,
-        contentType: file.name.startsWith('asset') ? 'image/png' : 'application/json',
+        contentType:
+          file.mimeType || (file.name.startsWith('asset') ? 'image/png' : 'application/json'),
       });
     }
     throw new Error(`Unexpected ${request.method()} ${url}`);
   });
 }
-export const state = () => ({ files: new Map(), log: [], next: 0, calls: [] });
+export const state = () => ({
+  files: new Map(),
+  log: [],
+  next: 0,
+  calls: [],
+  sessions: new Map(),
+});
 // Pre-populate a repository the way the former Sheets migration left it: seeds plus a root.
 export function seedRepository(state, revision, namespace = 'private-personal') {
   const put = (kind, key, value) => {

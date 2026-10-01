@@ -6,14 +6,16 @@ import {
   imageFileName,
   localDate,
   markdown,
+  ATTACHMENT_EXTENSIONS,
 } from '../model.js';
 export function parseArchive(bytes) {
   let total = 0;
   const files = unzipSync(bytes, {
     filter(info) {
       total += info.originalSize;
-      if (total > 300 * 1024 * 1024)
-        throw new Error('압축 해제 용량이 300MB를 넘습니다. 파일을 나누어 가져와주세요.');
+      // Backups with videos are larger; the whole archive is still unpacked in memory.
+      if (total > 1024 * 1024 * 1024)
+        throw new Error('압축 해제 용량이 1GB를 넘습니다. 파일을 나누어 가져와주세요.');
       return true;
     },
   });
@@ -84,7 +86,7 @@ export function parseArchive(bytes) {
         const asset = files[parent + name] || files[name];
         if (!asset) throw new Error(`Keep 첨부 원본 누락: ${name}`);
         const type = attachment.mimetype || attachment.mimeType;
-        if (!/^image\/(jpeg|png|webp|gif)$/.test(type))
+        if (!Object.hasOwn(ATTACHMENT_EXTENSIONS, type || ''))
           throw new Error(`지원하지 않는 Keep 첨부: ${name}. 원본 ZIP을 보존해주세요.`);
         const image = { id: crypto.randomUUID(), name: name.split('/').pop(), type };
         e.images.push(image);

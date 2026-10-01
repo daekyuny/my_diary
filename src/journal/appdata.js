@@ -6,6 +6,10 @@ const FORMAT = 'my-diary-private-v1';
 const FILE_FIELDS = 'id,name,appProperties,createdTime';
 const byCreation = (a, b) => `${a.createdTime}:${a.id}`.localeCompare(`${b.createdTime}:${b.id}`);
 const jsonBlob = (value) => new Blob([JSON.stringify(value)], { type: 'application/json' });
+// Videos and large files go up in resumable chunks, each well inside the request deadline.
+// Drive requires chunk sizes in multiples of 256 KiB.
+export const UPLOAD_CHUNK = 4 * 1024 * 1024;
+const resumable = (blob) => blob.size > 10 * 1024 * 1024 || /^video\//.test(blob.type);
 const quote = (s) => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 export const driveStore = {
   async list(namespace, kind) {
@@ -65,29 +69,65 @@ export const driveStore = {
     return (await google.request(`drive/v3/files/${encodeURIComponent(id)}?alt=media`)).blob();
   },
   async write(namespace, kind, key, blob) {
-    const boundary = `diary_${crypto.randomUUID()}`;
     const metadata = {
       name: `${kind}-${key}`,
       parents: ['appDataFolder'],
       appProperties: { format: FORMAT, namespace, kind, key },
     };
+    const file = resumable(blob)
+      ? await this.upload(metadata, blob)
+      : await this.multipart(metadata, blob);
+    // Verify the stored bytes: prefer the checksum Drive returns, otherwise read the file back.
+    const stored = file.sha256Checksum?.toLowerCase() || (await digest(await this.read(file.id)));
+    if (stored !== (await digest(blob)))
+      throw new Error('클라우드 저장 검증에 실패했습니다. 기존 데이터는 보존되어 있습니다.');
+    return file.id;
+  },
+  async multipart(metadata, blob) {
+    const boundary = `diary_${crypto.randomUUID()}`;
     const body = new Blob([
       `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${blob.type || 'application/octet-stream'}\r\n\r\n`,
       blob,
       `\r\n--${boundary}--`,
     ]);
-    const file = await (
+    return (
       await google.request('upload/drive/v3/files?uploadType=multipart&fields=id,sha256Checksum', {
         method: 'POST',
         headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
         body,
       })
     ).json();
-    // Verify the stored bytes: prefer the checksum Drive returns, otherwise read the file back.
-    const stored = file.sha256Checksum?.toLowerCase() || (await digest(await this.read(file.id)));
-    if (stored !== (await digest(blob)))
-      throw new Error('클라우드 저장 검증에 실패했습니다. 기존 데이터는 보존되어 있습니다.');
-    return file.id;
+  },
+  async upload(metadata, blob) {
+    const type = blob.type || 'application/octet-stream';
+    const start = await google.request(
+      'upload/drive/v3/files?uploadType=resumable&fields=id,sha256Checksum',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=UTF-8',
+          'X-Upload-Content-Type': type,
+          'X-Upload-Content-Length': String(blob.size),
+        },
+        body: JSON.stringify(metadata),
+      },
+    );
+    const session = start.headers.get('Location');
+    if (!session)
+      throw new Error('큰 파일 업로드를 시작하지 못했습니다. 잠시 후 다시 시도해주세요.');
+    for (let offset = 0; ; offset += UPLOAD_CHUNK) {
+      const end = Math.min(offset + UPLOAD_CHUNK, blob.size);
+      // 308 means the chunk is stored and Drive waits for the next one.
+      const response = await google.request(session, {
+        method: 'PUT',
+        headers: { 'Content-Range': `bytes ${offset}-${end - 1}/${blob.size}` },
+        body: blob.slice(offset, end, type),
+        accept: [308],
+        timeout: 120000,
+      });
+      if (response.status !== 308) return response.json();
+      if (end >= blob.size) throw new Error('업로드가 끝나지 않았습니다. 다시 시도해주세요.');
+    }
   },
   async remove(id) {
     await google.request(`drive/v3/files/${encodeURIComponent(id)}`, { method: 'DELETE' });

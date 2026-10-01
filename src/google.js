@@ -132,33 +132,38 @@ export function authorize(calendar = false) {
   });
 }
 
+// `path` is relative to www.googleapis.com, or a resumable upload session URL on that host.
+// `timeout` bounds the whole transfer; `accept` lists non-2xx statuses that are not errors.
 export async function request(path, options = {}, retried = false) {
   if (!connected()) await restoreSession();
   if (!connected())
     throw new Error('Google 연결이 필요합니다. 저장한 기록은 기기에 남아 있습니다.');
-  const url = `https://www.googleapis.com/${path}`;
+  const { timeout = 30000, accept = [], ...init } = options;
+  const url = path.startsWith('https://www.googleapis.com/')
+    ? path
+    : `https://www.googleapis.com/${path}`;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30000);
+  const timer = setTimeout(() => controller.abort(), timeout);
   let response;
   try {
     response = await fetch(url, {
-      ...options,
+      ...init,
       signal: controller.signal,
-      headers: { ...options.headers, Authorization: `Bearer ${token}` },
+      headers: { ...init.headers, Authorization: `Bearer ${token}` },
     });
     // Include response-body transfer in the deadline, not only the response headers.
     await response.clone().arrayBuffer();
   } catch (error) {
     if (controller.signal.aborted)
       throw new Error(
-        'Google 응답이 30초 동안 없어 중단했습니다. 기기 기록은 남아 있습니다. 네트워크를 확인하고 다시 연결해주세요.',
+        `Google 응답이 ${Math.round(timeout / 1000)}초 동안 없어 중단했습니다. 기기 기록은 남아 있습니다. 네트워크를 확인하고 다시 연결해주세요.`,
       );
     throw error;
   } finally {
     clearTimeout(timer);
   }
 
-  if (!response.ok) {
+  if (!response.ok && !accept.includes(response.status)) {
     if (response.status === 401 && authServer && !retried) {
       token = '';
       expiresAt = 0;
@@ -187,8 +192,8 @@ export async function identity() {
   ).user;
 }
 
-export async function downloadAsset(id) {
-  return (await request(`drive/v3/files/${encodeURIComponent(id)}?alt=media`)).blob();
+export async function downloadAsset(id, timeout) {
+  return (await request(`drive/v3/files/${encodeURIComponent(id)}?alt=media`, { timeout })).blob();
 }
 
 export async function calendars() {

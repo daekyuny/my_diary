@@ -2,6 +2,8 @@
 export const PHOTO_LIMIT = 10 * 1024 * 1024;
 // Phone photos are re-encoded, so a larger camera original is still accepted.
 export const CAMERA_LIMIT = 40 * 1024 * 1024;
+// Videos are stored as recorded; Drive app data counts against the Google account quota.
+export const VIDEO_LIMIT = 200 * 1024 * 1024;
 export const OPTIMIZED_SIDE = 2048;
 export const OPTIMIZED_QUALITY = 0.85;
 

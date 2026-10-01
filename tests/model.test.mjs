@@ -10,6 +10,7 @@ import {
   validateRevision,
   validDate,
   localDate,
+  imageFileName,
 } from '../src/model.js';
 
 test('concurrent changes retain both branches until an explicit merge', () => {
@@ -66,6 +67,23 @@ test('portable Markdown resolves image paths and rejects unsafe attachments', ()
   assert.match(markdown(entry), /attachments\/photo-1.png/);
   assert.throws(() =>
     makeRevision({ ...entry, images: [{ id: '../escape', name: 'x', type: 'image/svg+xml' }] }),
+  );
+});
+
+test('videos are valid attachments with their own file extensions', () => {
+  const entry = {
+    ...newEntry('2026-09-09'),
+    images: [
+      { id: 'clip-1', name: 'clip.mov', type: 'video/quicktime' },
+      { id: 'clip-2', name: 'clip.mp4', type: 'video/mp4' },
+      { id: 'clip-3', name: 'clip.webm', type: 'video/webm' },
+    ],
+  };
+  assert.doesNotThrow(() => makeRevision(entry));
+  assert.deepEqual(entry.images.map(imageFileName), ['clip-1.mov', 'clip-2.mp4', 'clip-3.webm']);
+  assert.throws(
+    () => makeRevision({ ...entry, images: [{ id: 'a', name: 'a', type: 'video/x-msvideo' }] }),
+    /지원하지 않는 첨부 파일/,
   );
 });
 

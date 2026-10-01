@@ -1,6 +1,6 @@
 import { icon } from './icons.js';
-import { localDate } from '../model.js';
-import { monthLabel, dateLabel } from './labels.js';
+import { localDate, isVideo } from '../model.js';
+import { monthLabel, dateLabel, durationLabel } from './labels.js';
 import { fold, highlightHTML, excerpt } from './search.js';
 export const escape = (text = '') =>
   String(text).replace(
@@ -67,7 +67,11 @@ export function cards(groups, view, hasFilter = false, query = '') {
           ? `<div class="month-label">${escape(section)}<small>—</small></div>`
           : '';
       previous = section;
-      const attachments = e.images.length ? `<span>${icon('photo')}${e.images.length}</span>` : '';
+      const videos = e.images.filter(isVideo).length,
+        photos = e.images.length - videos;
+      const attachments =
+        (photos ? `<span aria-label="사진 ${photos}개">${icon('photo')}${photos}</span>` : '') +
+        (videos ? `<span aria-label="동영상 ${videos}개">${icon('video')}${videos}</span>` : '');
       return `${heading}<button class="record" data-entry="${escape(e.id)}"><span class="record-date"><strong>${view === 'board' ? `${date.getMonth() + 1}월 ${date.getDate()}일` : String(date.getDate()).padStart(2, '0')}</strong><small>${date.toLocaleDateString('ko-KR', { weekday: 'short' })}</small></span><span class="record-content"><span class="record-top"><h2>${e.title ? highlightHTML(e.title, query) : '제목 없는 하루'}</h2>${e.pinned ? `<span class="pin-mark">${icon('pin')}</span>` : ''}</span><p>${preview(e.body, query)}</p><span class="record-meta"><span class="record-tags">${e.tags
         .slice(0, 4)
         .map((tag) => `<span>#${escape(tag)}</span>`)
@@ -110,6 +114,11 @@ export function calendarHTML(month, day, groups) {
       return `<button data-day="${date}" class="${date === localDate() ? 'today' : ''}" aria-label="${dateLabel(date)}, 일기 ${counts.get(date) || 0}개" aria-pressed="${date === day}"><span>${i + 1}</span>${dayMark(counts.get(date))}</button>`;
     },
   ).join('')}</div>`;
+}
+// Preview tile for an attachment; videos carry a play mark and their length.
+export function attachmentPreviewHTML(item, url) {
+  const video = isVideo(item);
+  return `<button type="button" class="photo-preview${video ? ' video-preview' : ''}" data-open-photo="${escape(item.id)}" aria-label="${video ? '동영상 재생' : '원본 사진 보기'}"><img src="${escape(url)}" alt="${video ? '첨부 동영상 미리보기' : '첨부 사진 미리보기'}"/>${video ? `<span class="video-badge">${icon('play')}${item.duration ? durationLabel(item.duration) : ''}</span>` : ''}</button>`;
 }
 export function validateDefinition(field) {
   if (!field.name.trim() || field.name.length > 50)

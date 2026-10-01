@@ -1,7 +1,7 @@
 // Journal controller: owns screen state and wires DOM events to the modules below.
 import { renderBody } from '../body-links.js';
 import { revisionCache } from './revision-cache.js';
-import { openPhoto } from './photo-viewer.js';
+import { openPhoto, openVideo } from './photo-viewer.js';
 import { appUpdates } from './updates.js';
 import { hydrateIcons } from './icons.js';
 import { markMatches } from './search.js';
@@ -20,6 +20,7 @@ import {
   repositoryOptionsHTML,
   quickEntryVisible,
   readingPosition,
+  attachmentPreviewHTML,
 } from './views.js';
 import {
   connectionLabel,
@@ -33,7 +34,7 @@ import {
   characterCount,
 } from './labels.js';
 import { findRepositories, createRepository, openRepository } from './appdata.js';
-import { newEntry, localDate, validDate, makeRevision, mergeEvents } from '../model.js';
+import { newEntry, localDate, validDate, makeRevision, mergeEvents, isVideo } from '../model.js';
 import { expired, nextRevision } from './current.js';
 import { $, toast, small, confirmDialog, download } from './dom.js';
 import { loadSettings, saveSettings, ownerKey } from './settings.js';
@@ -53,7 +54,13 @@ import { importArchive, exportArchive } from './transfer.js';
 import { eventsForDate, manualEvent } from './calendar.js';
 import * as store from '../storage.js';
 import * as google from '../google.js';
-import { createPhoto, previewBlob, uploadPhoto, cleanLocalPhotos, assetBlob } from './photos.js';
+import {
+  createAttachment,
+  previewBlob,
+  uploadPhoto,
+  cleanLocalPhotos,
+  assetBlob,
+} from './photos.js';
 
 hydrateIcons();
 let settings = loadSettings();
@@ -484,7 +491,14 @@ function readingNav() {
 }
 // Step to the neighbouring diary in reading mode only; edits and other dialogs stay put.
 function moveEntry(step, trigger = null) {
-  if (!entry || editing || dirty || busy || $('#photo-dialog')?.open || $('#small-dialog').open)
+  if (
+    !entry ||
+    editing ||
+    dirty ||
+    busy ||
+    document.querySelector('#photo-dialog[open], #video-dialog[open]') ||
+    $('#small-dialog').open
+  )
     return;
   const position = readingPosition(shownGroups(), entry.id);
   const id = step < 0 ? position.previous : position.next;
@@ -558,10 +572,7 @@ async function renderPhotos() {
       if (generation !== photoGeneration) return;
       const url = URL.createObjectURL(blob);
       urls.push(url);
-      figure.insertAdjacentHTML(
-        'afterbegin',
-        `<button type="button" class="photo-preview" data-open-photo="${escape(image.id)}" aria-label="원본 사진 보기"><img src="${url}" alt="첨부 사진 미리보기"/></button>`,
-      );
+      figure.insertAdjacentHTML('afterbegin', attachmentPreviewHTML(image, url));
     } catch {
       if (generation === photoGeneration)
         figure.insertAdjacentText('beforeend', ' · Google 연결 후 원본 확인');
@@ -982,7 +993,7 @@ $('#photos').onclick = (e) => {
   const open = e.target.closest('[data-open-photo]');
   if (open) {
     const image = entry.images.find((item) => item.id === open.dataset.openPhoto);
-    openPhoto(image, () => assetBlob(image));
+    (isVideo(image) ? openVideo : openPhoto)(image, () => assetBlob(image));
     return;
   }
   const b = e.target.closest('[data-remove-photo]');
@@ -998,7 +1009,7 @@ $('#add-photo').onclick = () => $('#photo-input').click();
 $('#photo-input').onchange = () =>
   task(async () => {
     for (const file of $('#photo-input').files) {
-      const image = await createPhoto(file, settings.photoQuality);
+      const image = await createAttachment(file, settings.photoQuality);
       entry.images.push(image);
       changed();
     }
@@ -1182,7 +1193,7 @@ document.addEventListener('keydown', (e) => {
     $('#editor-dialog').open &&
     !e.target.matches('input,textarea,select,[contenteditable]')
   ) {
-    if (!editing && !$('#photo-dialog')?.open) {
+    if (!editing && !document.querySelector('#photo-dialog[open], #video-dialog[open]')) {
       e.preventDefault();
       moveEntry(e.key === 'ArrowLeft' ? -1 : 1);
     }

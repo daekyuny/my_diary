@@ -267,3 +267,80 @@ function createViewer() {
     },
   };
 }
+
+// Videos play in their own dialog; the original is downloaded only when it is opened.
+let videoViewer;
+export function openVideo(item, load) {
+  videoViewer ||= createVideoViewer();
+  return videoViewer.open(item, load);
+}
+function createVideoViewer() {
+  const dialog = document.createElement('dialog');
+  dialog.id = 'video-dialog';
+  dialog.setAttribute('aria-label', '첨부 동영상');
+  dialog.innerHTML = `<div class="photo-viewer">
+    <header class="photo-toolbar">
+      <strong>동영상</strong>
+      <div class="photo-tools">
+        <button type="button" class="icon-button" data-video-action="close" aria-label="동영상 닫기" title="동영상 닫기">${icon('close')}</button>
+      </div>
+    </header>
+    <div class="photo-stage video-stage">
+      <video controls playsinline preload="metadata" hidden></video>
+      <p class="photo-status" role="status">동영상을 불러오는 중…</p>
+    </div>
+    <footer class="photo-footer"><span></span><a class="photo-download" hidden>원본 다운로드</a></footer>
+  </div>`;
+  document.body.append(dialog);
+  const video = dialog.querySelector('video');
+  const status = dialog.querySelector('.photo-status');
+  const download = dialog.querySelector('.photo-download');
+  let url,
+    generation = 0;
+  function clean() {
+    generation++;
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    video.hidden = true;
+    download.hidden = true;
+    download.removeAttribute('href');
+    if (url) URL.revokeObjectURL(url);
+    url = null;
+  }
+  // HEVC .mov files from an iPhone do not play in every browser; the original stays downloadable.
+  video.addEventListener('error', () => {
+    if (!url) return;
+    video.hidden = true;
+    status.hidden = false;
+    status.textContent = '이 브라우저에서 재생할 수 없는 형식입니다. 원본을 내려받아 확인해주세요.';
+  });
+  dialog.addEventListener('close', clean);
+  dialog.addEventListener('click', (event) => {
+    if (event.target.closest('[data-video-action="close"]')) dialog.close();
+  });
+  return {
+    async open(item, load) {
+      clean();
+      const current = generation;
+      status.hidden = false;
+      status.textContent = '동영상을 불러오는 중…';
+      if (!dialog.open) dialog.showModal();
+      dialog.querySelector('[data-video-action="close"]').focus();
+      try {
+        const blob = await load();
+        if (current !== generation || !dialog.open) return;
+        url = URL.createObjectURL(blob);
+        download.href = url;
+        download.download = item.name;
+        download.hidden = false;
+        video.src = url;
+        video.hidden = false;
+        status.hidden = true;
+      } catch (error) {
+        if (current === generation && dialog.open)
+          status.textContent = `동영상을 열지 못했습니다: ${error.message}`;
+      }
+    },
+  };
+}

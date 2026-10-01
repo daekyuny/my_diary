@@ -18,6 +18,8 @@ const paths = {
   chevronLeft: 'm15 5-7 7 7 7',
   close: 'm6 6 12 12M6 18 18 6',
   photo: 'M3 3h18v18H3ZM3 17l6-6 4 4 3-3 5 5M15 7h.01',
+  video: 'M3 6h13v12H3ZM16 10l5-3v10l-5-3',
+  play: 'M8 5v14l11-7Z',
   download: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',
   upload: 'M12 15V3m-5 5 5-5 5 5M4 16v5h16v-5',
   tag: 'M20 13 11 22 2 13V2h11l9 9-2 2ZM7 7h.01',
