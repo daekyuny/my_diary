@@ -195,12 +195,21 @@ button:hover:not(:disabled) {
   background: var(--soft);
 }
 button:focus-visible,
-a:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+/* Fields draw their focus ring inside the box so it never spills past the layout edge. */
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
   outline: 2px solid var(--focus);
-  outline-offset: 3px;
+  outline-offset: -2px;
+}
+/* <main> only receives focus as the skip-link target or when a dialog closes over a removed
+   card (Safari); it needs no ring. */
+main:focus {
+  outline: none;
 }
 input,
 textarea,
@@ -508,7 +517,13 @@ svg {
   width: 100%;
   padding: 11px 0;
   font-size: 11px;
-  outline-offset: 5px;
+}
+.search input:focus-visible {
+  outline: none;
+}
+.search:focus-within {
+  border-color: var(--focus);
+  box-shadow: inset 0 0 0 1px var(--focus);
 }
 .search kbd {
   font-size: 9px;
@@ -965,7 +980,7 @@ main {
 }
 .month-picker:focus-within {
   outline: 2px solid var(--focus);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 /* Like the editor date, the native month input is invisible over the Korean label. */
 .month-picker input {
@@ -1087,6 +1102,13 @@ dialog::backdrop {
   border-bottom: 1px solid var(--line);
   gap: 18px;
 }
+/* The close button stays in reach while a long dialog such as the settings scrolls. */
+dialog > .dialog-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--paper);
+}
 .dialog-header h2 {
   font-size: 22px;
   font-weight: 550;
@@ -1148,7 +1170,7 @@ dialog::backdrop {
 }
 .editor-date:focus-within {
   outline: 2px solid var(--focus);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 .editor-date svg {
   width: 15px;
@@ -1203,11 +1225,13 @@ dialog::backdrop {
   color: var(--placeholder);
   line-height: 2.1;
 }
-.entry-title:focus-visible,
+/* The title and body are the writing surface: an underline and the caret show focus. */
+.entry-title:focus-visible {
+  outline: none;
+  box-shadow: inset 0 -2px 0 var(--line-strong);
+}
 #entry-body:focus-visible {
-  outline: 1px solid var(--line-strong);
-  outline-offset: 7px;
-  border-radius: 4px;
+  outline: none;
 }
 .entry-section {
   border-top: 1px solid var(--line);
@@ -2113,7 +2137,13 @@ dialog::backdrop {
     max-height: 94dvh;
   }
   .dialog-header {
-    padding: 20px;
+    padding: 14px 16px 14px 20px;
+  }
+  .settings-dialog .dialog-header .eyebrow {
+    display: none;
+  }
+  .dialog-header h2 {
+    margin-top: 0;
   }
   .dialog-header h2 {
     font-size: 20px;

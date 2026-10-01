@@ -14,6 +14,13 @@
         if (['small', 'large'].includes(saved.textSize))
           document.documentElement.dataset.textSize = saved.textSize;
       } catch {}
+      // iOS zooms into fields under 16px and leaves the page shifted. maximum-scale stops that
+      // auto-zoom; iOS still allows pinch zoom, unlike Android, so only iOS gets it.
+      if (
+        /iPhone|iPad|iPod/.test(navigator.userAgent) ||
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+      )
+        document.querySelector('meta[name=viewport]').content += ', maximum-scale=1';
     </script>
     <meta
       name="description"
@@ -81,7 +88,7 @@
             type="search"
             placeholder="기억하고 싶은 순간 검색"
             aria-label="일기 검색"
-          /><kbd>⌘ K</kbd></label
+          /><kbd id="search-shortcut" title="검색 바로가기">Ctrl K</kbd></label
         ><button id="sync" class="sync-button" aria-label="클라우드 새로고침">
           <span data-icon="refresh"></span><span id="connection">기기에 저장</span></button
         ><button id="mobile-settings" class="icon-button mobile-only" aria-label="설정">

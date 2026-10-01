@@ -276,6 +276,49 @@ test('theme follows the system unless the device setting forces light or dark', 
   expect(await background()).toBe(light);
 });
 
+test('focus rings stay inside fields, iOS skips input zoom and the settings close stays in reach', async ({
+  page,
+}, info) => {
+  const mobile = info.project.name === 'mobile-chromium';
+  // The iPhone user agent gets maximum-scale so tapping a small field does not zoom the page.
+  expect(await page.locator('meta[name=viewport]').getAttribute('content')).toContain(
+    mobile ? 'maximum-scale=1' : 'viewport-fit',
+  );
+  if (!mobile)
+    expect(await page.locator('meta[name=viewport]').getAttribute('content')).not.toContain(
+      'maximum-scale',
+    );
+  if (!mobile) {
+    await expect(page.locator('#search-shortcut')).toHaveText('Ctrl K');
+    await expect(page.locator('#search-shortcut')).toHaveAttribute('title', /검색 바로가기/);
+  }
+  await page.locator('#search').focus();
+  expect(await page.locator('#search').evaluate((el) => getComputedStyle(el).outlineStyle)).toBe(
+    'none',
+  );
+  expect(
+    await page.locator('.search').evaluate((el) => getComputedStyle(el).borderTopColor),
+  ).not.toBe(await page.locator('.filters').evaluate((el) => getComputedStyle(el).borderTopColor));
+  await newEntry(page);
+  await page.locator('#entry-tags').focus();
+  expect(
+    await page.locator('#entry-tags').evaluate((el) => getComputedStyle(el).outlineOffset),
+  ).toBe('-2px');
+  await page.locator('#entry-title').fill('포커스');
+  await saveClose(page);
+  // Closing a diary must not leave a ring on <main> (Safari focuses it when the card is gone).
+  await page.locator('#main').focus();
+  expect(await page.locator('#main').evaluate((el) => getComputedStyle(el).outlineStyle)).toBe(
+    'none',
+  );
+  await settings(page);
+  await page.locator('#settings-dialog').evaluate((el) => (el.scrollTop = el.scrollHeight));
+  await expect(page.locator('#close-settings')).toBeInViewport();
+  await page.screenshot({ path: `artifacts/settings-scrolled-${info.project.name}.png` });
+  await page.locator('#close-settings').click();
+  await expect(page.locator('#settings-dialog')).not.toBeVisible();
+});
+
 test('custom fields are removed from settings and the editor', async ({ page }) => {
   await settings(page);
   await expect(page.locator('#new-definition')).toHaveCount(0);

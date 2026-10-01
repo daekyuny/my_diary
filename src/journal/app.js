@@ -117,6 +117,11 @@ function applyDisplay() {
   });
 }
 applyDisplay();
+// The search shortcut hint names the key this keyboard uses (⌘K on Apple, Ctrl+K elsewhere).
+if (/Mac|iPhone|iPad/.test(navigator.platform)) {
+  $('#search-shortcut').textContent = '⌘ K';
+  $('#search-shortcut').title = '검색 바로가기 (⌘+K)';
+} else $('#search-shortcut').title = '검색 바로가기 (Ctrl+K)';
 const persistSettings = () => saveSettings(settings);
 const working = () => busy || syncing || connecting;
 function locks(value) {
