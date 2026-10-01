@@ -70,7 +70,7 @@ test('save state label reflects dirty edits, conflicts, cloud and device saves',
   assert.equal(saveStateLabel({}), '새 기록');
   assert.equal(pageTitle('journal', 'calendar'), '날짜로 보는 기록');
   assert.equal(pageTitle('archive', 'list'), '삭제한 기록');
-  assert.equal(quickLabel('calendar', '2026-09-29'), '2026-09-29에 새 기록 남기기');
+  assert.equal(quickLabel('calendar', '2026-09-29'), '9월 29일에 새 기록 남기기');
   assert.equal(quickLabel('list', ''), '오늘 기록 남기기');
   assert.equal(characterCount('a'.repeat(1234)), '1,234자');
 });

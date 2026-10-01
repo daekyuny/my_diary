@@ -33,7 +33,9 @@ export function pageDescription(collection) {
       : '평범한 하루에도, 기억하고 싶은 순간은 있으니까.';
 }
 export function quickLabel(view, day) {
-  return view === 'calendar' && day ? `${day}에 새 기록 남기기` : '오늘 기록 남기기';
+  if (view !== 'calendar' || !day) return '오늘 기록 남기기';
+  const [, month, date] = day.split('-').map(Number);
+  return `${month}월 ${date}일에 새 기록 남기기`;
 }
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 // One date style across reading, editing and the calendar: "2026년 9월 29일 화요일".

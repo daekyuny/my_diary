@@ -153,6 +153,48 @@ test('reading mode steps through the shown list, hides the count and follows the
   ).toBe(large);
 });
 
+test('calendar names the month in Korean, marks days with badges and reveals the picked day', async ({
+  page,
+}) => {
+  await page.evaluate(async () => {
+    const model = await import('/src/model.js'),
+      store = await import('/src/storage.js');
+    await store.openStore('sheets-local');
+    for (const [date, title] of [
+      ['2026-08-07', '아침'],
+      ['2026-08-07', '저녁'],
+      ['2026-08-28', '월말'],
+    ])
+      await store.put('revisions', model.makeRevision({ ...model.newEntry(date), title }));
+  });
+  await page.reload();
+  await page.getByRole('button', { name: '캘린더 보기', exact: true }).click();
+  await page.getByLabel('캘린더 월').fill('2026-08');
+  await expect(page.locator('#calendar-month-label')).toHaveText('2026년 8월');
+  await expect(page.locator('[data-day="2026-08-07"] .day-mark')).toHaveText('2');
+  await expect(page.locator('[data-day="2026-08-28"] .day-mark')).toHaveClass(/dot/);
+  await expect(page.locator('[data-day="2026-08-28"]')).toHaveAttribute(
+    'aria-label',
+    '2026년 8월 28일 금요일, 일기 1개',
+  );
+  await expect(page.locator('[data-day="2026-08-03"] .day-mark')).toHaveCount(0);
+  const cell = await page.locator('[data-day="2026-08-07"]').boundingBox();
+  const mark = await page.locator('[data-day="2026-08-07"] .day-mark').boundingBox();
+  expect(mark.y + mark.height).toBeLessThanOrEqual(cell.y + cell.height);
+  await page.getByRole('button', { name: '다음 달' }).click();
+  await expect(page.locator('#calendar-month-label')).toHaveText('2026년 9월');
+  await page.getByRole('button', { name: '이전 달' }).click();
+  await page.locator('[data-day="2026-08-28"]').click();
+  await expect(page.locator('.record')).toHaveCount(1);
+  await expect(page.locator('.record')).toBeInViewport({ ratio: 0.9 });
+  const nav = await page.locator('.bottom-nav').boundingBox();
+  if (nav)
+    expect(
+      (await page.locator('.record').boundingBox()).y +
+        (await page.locator('.record').boundingBox()).height,
+    ).toBeLessThanOrEqual(nav.y);
+});
+
 test('custom fields are removed from settings and the editor', async ({ page }) => {
   await settings(page);
   await expect(page.locator('#new-definition')).toHaveCount(0);
@@ -239,7 +281,7 @@ test('today prompt shows only until today has a diary and trash purge asks in-ap
   await page.locator('#calendar-month').fill('2026-08');
   await page.locator('[data-day="2026-08-07"]').click();
   await expect(page.locator('#quick-entry')).toBeVisible();
-  await expect(page.locator('#quick-label')).toHaveText('2026-08-07에 새 기록 남기기');
+  await expect(page.locator('#quick-label')).toHaveText('8월 7일에 새 기록 남기기');
   await settings(page);
   await page.locator('#purge-trash').click();
   await expect(page.locator('#confirm-message')).toContainText('완전 삭제할까요');

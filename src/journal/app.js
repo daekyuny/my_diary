@@ -870,6 +870,14 @@ $('#calendar').onchange = (e) => {
 $('#calendar').onclick = (e) => {
   const date = e.target.closest('[data-day]'),
     step = e.target.closest('[data-month-step]');
+  if (e.target.id === 'calendar-month') {
+    try {
+      e.target.showPicker?.();
+    } catch {
+      /* Browsers without showPicker open their own picker on tap. */
+    }
+    return;
+  }
   if (date) day = date.dataset.day;
   else if (step) {
     const d = new Date(`${month}-01T12:00:00`);
@@ -881,7 +889,18 @@ $('#calendar').onclick = (e) => {
     day = localDate();
   } else if (e.target.closest('#clear-day')) day = '';
   render();
+  if (date) revealDay();
 };
+// On a phone the filtered records sit below the month grid; bring the first one into view.
+function revealDay() {
+  const first = $('#records .record');
+  if (!first) return;
+  const bottom = $('.bottom-nav').getBoundingClientRect().top || innerHeight;
+  const box = first.getBoundingClientRect();
+  if (box.top >= 0 && box.bottom <= Math.min(bottom, innerHeight)) return;
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  first.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+}
 $('#events').oninput = (e) => {
   if (e.target.dataset.eventTitle !== undefined) {
     const item = entry.events[Number(e.target.dataset.eventTitle)];

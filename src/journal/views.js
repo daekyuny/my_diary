@@ -1,5 +1,6 @@
 import { icon } from './icons.js';
 import { localDate } from '../model.js';
+import { monthLabel, dateLabel } from './labels.js';
 export const escape = (text = '') =>
   String(text).replace(
     /[&<>"']/g,
@@ -89,15 +90,20 @@ export function quickEntryVisible(groups, { collection, view, day, today = local
   if (view === 'calendar' && day) return true;
   return !groups.some(({ latest: { entry } }) => !entry.archived && entry.date === today);
 }
+// One diary shows a dot, more show their number; the full count is in the cell's aria-label.
+const dayMark = (count = 0) =>
+  count
+    ? `<small class="day-mark${count > 1 ? '' : ' dot'}" aria-hidden="true">${count > 1 ? count : ''}</small>`
+    : '';
 export function calendarHTML(month, day, groups) {
   const [year, m] = month.split('-').map(Number),
     counts = new Map();
   groups.forEach(({ latest: { entry: e } }) => counts.set(e.date, (counts.get(e.date) || 0) + 1));
-  return `<div class="month-bar"><button data-month-step="-1" aria-label="이전 달">${icon('back')}</button><input id="calendar-month" type="month" aria-label="캘린더 월" value="${month}"/><button data-month-step="1" aria-label="다음 달">${icon('arrow')}</button><button id="calendar-today">오늘</button><button id="clear-day">선택 해제</button></div><div class="month-grid">${['일', '월', '화', '수', '목', '금', '토'].map((d) => `<span>${d}</span>`).join('')}${'<span class="blank"></span>'.repeat(new Date(year, m - 1, 1).getDay())}${Array.from(
+  return `<div class="month-bar"><button data-month-step="-1" aria-label="이전 달">${icon('back')}</button><label class="month-picker"><span id="calendar-month-label">${monthLabel(month)}</span><input id="calendar-month" type="month" aria-label="캘린더 월" value="${month}"/></label><button data-month-step="1" aria-label="다음 달">${icon('arrow')}</button><button id="calendar-today">오늘</button><button id="clear-day">선택 해제</button></div><div class="month-grid">${['일', '월', '화', '수', '목', '금', '토'].map((d) => `<span>${d}</span>`).join('')}${'<span class="blank"></span>'.repeat(new Date(year, m - 1, 1).getDay())}${Array.from(
     { length: new Date(year, m, 0).getDate() },
     (_, i) => {
       const date = `${month}-${String(i + 1).padStart(2, '0')}`;
-      return `<button data-day="${date}" class="${date === localDate() ? 'today' : ''}" aria-label="${date}, 일기 ${counts.get(date) || 0}개" aria-pressed="${date === day}"><span>${i + 1}</span><small>${counts.get(date) ? `${counts.get(date)}개의 기록` : ''}</small></button>`;
+      return `<button data-day="${date}" class="${date === localDate() ? 'today' : ''}" aria-label="${dateLabel(date)}, 일기 ${counts.get(date) || 0}개" aria-pressed="${date === day}"><span>${i + 1}</span>${dayMark(counts.get(date))}</button>`;
     },
   ).join('')}</div>`;
 }
