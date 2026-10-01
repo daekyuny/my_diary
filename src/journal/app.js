@@ -4,6 +4,7 @@ import { revisionCache } from './revision-cache.js';
 import { openPhoto } from './photo-viewer.js';
 import { appUpdates } from './updates.js';
 import { hydrateIcons } from './icons.js';
+import { markMatches } from './search.js';
 import {
   escape,
   visibleGroups,
@@ -237,6 +238,7 @@ function render() {
       shown.slice(0, visibleLimit),
       view,
       Boolean(base.query || base.tag || base.from || base.to || day || collection !== 'journal'),
+      base.query,
     ) +
     (shown.length > visibleLimit
       ? '<button id="load-more" class="button">기록 더 보기</button>'
@@ -423,6 +425,10 @@ async function openEntry(id, date = day || localDate()) {
   fillEditor();
   if (!$('#editor-dialog').open) $('#editor-dialog').showModal();
   desiredFocus = editing ? $('#entry-title') : $('#edit-entry');
+  // A diary opened from a search starts at its first match; any other starts at the top.
+  const match = !editing && $('#entry-reading mark');
+  if (match) match.scrollIntoView({ block: 'center' });
+  else $('#editor-dialog').scrollTop = 0;
 }
 function renderReading() {
   $('#resolve-conflict').hidden = !conflictingRevision;
@@ -430,6 +436,9 @@ function renderReading() {
   $('#reading-title').textContent = entry.title || '제목 없는 일기';
   $('#reading-date').textContent = dateLabel(entry.date);
   renderBody($('#reading-body'), entry.body);
+  const query = $('#search').value.trim();
+  if (entry.title) markMatches($('#reading-title'), query);
+  markMatches($('#reading-body'), query);
   $('#reading-details').innerHTML = readingDetailsHTML(entry);
 }
 $('#resolve-conflict').onclick = () => {
@@ -472,7 +481,6 @@ function moveEntry(step, trigger = null) {
   if (!id) return;
   task(async () => {
     await openEntry(id);
-    $('#editor-dialog').scrollTop = 0;
     const after = readingPosition(shownGroups(), id);
     if (trigger && (step < 0 ? after.previous : after.next)) desiredFocus = trigger;
   });

@@ -2412,3 +2412,13 @@ dialog::backdrop {
     font-size: max(16px, var(--body-size));
   }
 }
+
+/* Search matches in cards and in the reading view. */
+mark {
+  background: #f3e3a6;
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}

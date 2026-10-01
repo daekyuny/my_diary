@@ -1,6 +1,7 @@
 import { icon } from './icons.js';
 import { localDate } from '../model.js';
 import { monthLabel, dateLabel } from './labels.js';
+import { fold, highlightHTML, excerpt } from './search.js';
 export const escape = (text = '') =>
   String(text).replace(
     /[&<>"']/g,
@@ -19,18 +20,17 @@ export function visibleGroups(
     order = 'desc',
   } = {},
 ) {
-  const needle = query.normalize('NFKC').toLocaleLowerCase();
+  const needle = fold(query);
   return groups
     .filter(({ latest: { entry: e } }) => {
-      const text = [
-        e.title,
-        e.body,
-        ...e.tags,
-        ...e.events.flatMap((event) => [event.title, event.note]),
-      ]
-        .join('\n')
-        .normalize('NFKC')
-        .toLocaleLowerCase();
+      const text = fold(
+        [
+          e.title,
+          e.body,
+          ...e.tags,
+          ...e.events.flatMap((event) => [event.title, event.note]),
+        ].join('\n'),
+      );
       return (
         (collection === 'archive' ? e.archived : !e.archived) &&
         (collection !== 'pinned' || e.pinned) &&
@@ -49,7 +49,11 @@ export function visibleGroups(
         b.latest.savedAt.localeCompare(a.latest.savedAt),
     );
 }
-export function cards(groups, view, hasFilter = false) {
+function preview(body, query) {
+  const text = body.replace(/!\[[^\]]*\]\(diary-image:[^)]+\)/g, '');
+  return text ? highlightHTML(excerpt(text, query), query) : '이날의 순간을 남겨보세요.';
+}
+export function cards(groups, view, hasFilter = false, query = '') {
   if (!groups.length)
     return `<div class="empty"><span class="empty-symbol">${icon(hasFilter ? 'search' : 'book')}</span><h2>${hasFilter ? '찾는 기록이 아직 없어요' : '첫 번째 하루를 남겨보세요'}</h2><p>${hasFilter ? '검색어나 날짜, 태그를 바꿔 찾아보세요.' : '거창하지 않아도 좋아요.<br/>오늘 기억하고 싶은 순간 하나면 충분해요.'}</p>${hasFilter ? '' : `<button id="empty-new" class="primary">${icon('plus')} 첫 기록 쓰기</button>`}</div>`;
   let previous = '';
@@ -64,7 +68,7 @@ export function cards(groups, view, hasFilter = false) {
           : '';
       previous = section;
       const attachments = e.images.length ? `<span>${icon('photo')}${e.images.length}</span>` : '';
-      return `${heading}<button class="record" data-entry="${escape(e.id)}"><span class="record-date"><strong>${view === 'board' ? `${date.getMonth() + 1}월 ${date.getDate()}일` : String(date.getDate()).padStart(2, '0')}</strong><small>${date.toLocaleDateString('ko-KR', { weekday: 'short' })}</small></span><span class="record-content"><span class="record-top"><h2>${escape(e.title || '제목 없는 하루')}</h2>${e.pinned ? `<span class="pin-mark">${icon('pin')}</span>` : ''}</span><p>${escape(e.body.replace(/!\[[^\]]*\]\(diary-image:[^)]+\)/g, '') || '이날의 순간을 남겨보세요.')}</p><span class="record-meta"><span class="record-tags">${e.tags
+      return `${heading}<button class="record" data-entry="${escape(e.id)}"><span class="record-date"><strong>${view === 'board' ? `${date.getMonth() + 1}월 ${date.getDate()}일` : String(date.getDate()).padStart(2, '0')}</strong><small>${date.toLocaleDateString('ko-KR', { weekday: 'short' })}</small></span><span class="record-content"><span class="record-top"><h2>${e.title ? highlightHTML(e.title, query) : '제목 없는 하루'}</h2>${e.pinned ? `<span class="pin-mark">${icon('pin')}</span>` : ''}</span><p>${preview(e.body, query)}</p><span class="record-meta"><span class="record-tags">${e.tags
         .slice(0, 4)
         .map((tag) => `<span>#${escape(tag)}</span>`)
         .join(

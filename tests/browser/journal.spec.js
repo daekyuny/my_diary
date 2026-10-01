@@ -197,6 +197,44 @@ test('calendar names the month in Korean, marks days with badges and reveals the
     ).toBeLessThanOrEqual(nav.y);
 });
 
+test('search marks matches in cards and scrolls the opened diary to the first match', async ({
+  page,
+}) => {
+  await page.evaluate(async () => {
+    const model = await import('/src/model.js'),
+      store = await import('/src/storage.js');
+    await store.openStore('sheets-local');
+    const body = `${'오늘도 평범한 하루였다.\n'.repeat(60)}저녁에는 <b>호숫가</b>를 걸었다. https://example.com/호숫가 링크도 남긴다.`;
+    await store.put(
+      'revisions',
+      model.makeRevision({ ...model.newEntry('2026-09-20'), title: '긴 하루', body }),
+    );
+    await store.put(
+      'revisions',
+      model.makeRevision({ ...model.newEntry('2026-09-21'), title: '다른 날', body: '짧은 글' }),
+    );
+  });
+  await page.reload();
+  await page.locator('#search').fill('호숫가');
+  await expect(page.locator('.record')).toHaveCount(1);
+  await expect(page.locator('.record p')).toContainText('…저녁에는 <b>호숫가</b>');
+  await expect(page.locator('.record p mark').first()).toHaveText('호숫가');
+  await expect(page.locator('.record b')).toHaveCount(0);
+  await page.locator('.record').click();
+  const first = page.locator('#reading-body mark').first();
+  await expect(first).toHaveText('호숫가');
+  await expect(first).toBeInViewport();
+  // The URL stays one working link even though the query appears inside it.
+  await expect(page.locator('#reading-body a')).toHaveCount(1);
+  await expect(page.locator('#reading-body a mark')).toHaveText('호숫가');
+  await expect(page.locator('#reading-body b')).toHaveCount(0);
+  await page.locator('#close-editor').click();
+  await expect(page.locator('#editor-dialog')).not.toBeVisible();
+  await page.locator('#search').fill('');
+  await page.locator('.record').last().click();
+  await expect(page.locator('#reading-body mark')).toHaveCount(0);
+});
+
 test('custom fields are removed from settings and the editor', async ({ page }) => {
   await settings(page);
   await expect(page.locator('#new-definition')).toHaveCount(0);
