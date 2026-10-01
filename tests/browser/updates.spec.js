@@ -140,6 +140,9 @@ test('manual update discovers a new build and offline checks keep the current ap
   context,
   browserName,
 }, info) => {
+  // Installing a second service worker waits up to 25 s on a busy runner; leave room for the
+  // offline check after it.
+  test.setTimeout(60000);
   const site = await fixture();
   try {
     await page.route('https://accounts.google.com/**', (r) => r.abort());

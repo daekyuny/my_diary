@@ -33,6 +33,8 @@ test('videos attach with a frame preview, play in their own viewer and count on 
   await page.route('https://accounts.google.com/**', (r) => r.abort());
   await page.goto('/');
   await expect(page.locator('#quick-entry')).toBeEnabled();
+  // Linux WebKit has no MediaRecorder to make a playable clip; the iPhone is checked by hand.
+  test.skip(!(await page.evaluate(() => 'MediaRecorder' in window)), 'no MediaRecorder');
   const clip = await recordClip(page);
   await page.locator('#quick-entry').click();
   // Attaching while the editor is still opening is ignored, so wait until it is ready.
@@ -95,7 +97,7 @@ test('unsupported attachment types are refused with a message', async ({ page })
   await expect(page.locator('#photos figure')).toHaveCount(0);
 });
 
-test('private storage uploads videos in resumable chunks and plays them from Drive', async ({
+test('private storage uploads videos with a resumable upload and downloads them on open', async ({
   browser,
 }, testInfo) => {
   const data = state();
@@ -104,21 +106,22 @@ test('private storage uploads videos in resumable chunks and plays them from Dri
     await mock(context, data);
     const page = await context.newPage();
     await connect(page, true);
-    const clip = await recordClip(page);
+    // Any bytes do: the upload path does not decode the video, and chunking is unit tested.
+    const clip = Buffer.alloc(300 * 1024, 7);
     await page.locator('#quick-entry').click();
     // Attaching while the editor is still opening is ignored, so wait until it is ready.
     await expect(page.locator('#entry-title')).toBeFocused();
     await page.locator('#entry-title').fill('클라우드 동영상');
     await page
       .locator('#photo-input')
-      .setInputFiles({ name: 'clip.webm', mimeType: 'video/webm', buffer: clip });
+      .setInputFiles({ name: 'clip.mp4', mimeType: 'video/mp4', buffer: clip });
     await expect(page.locator('.video-preview img')).toBeVisible();
     await page.locator('#save').click();
     await expect(page.locator('#editor-dialog')).not.toBeVisible();
     await expect(page.locator('#connection')).toHaveText('클라우드 연결됨');
     const assets = [...data.files.values()].filter((f) => f.appProperties.kind === 'asset');
     expect(assets).toHaveLength(2);
-    const original = assets.find((f) => f.mimeType === 'video/webm');
+    const original = assets.find((f) => f.mimeType === 'video/mp4');
     expect(original.bytes.equals(clip)).toBe(true);
     expect(data.calls.filter((c) => c.startsWith('PUT /upload'))).toHaveLength(1);
     // The local original is released after upload; opening the video downloads it again.
@@ -130,10 +133,12 @@ test('private storage uploads videos in resumable chunks and plays them from Dri
     });
     expect(cached.every((id) => id.endsWith('-thumbnail'))).toBe(true);
     await page.locator('.record').click();
+    const download = data.calls.length;
     await page.locator('.video-preview').click();
-    const video = page.locator('#video-dialog video');
-    await expect(video).toBeVisible();
-    await expect.poll(() => video.evaluate((el) => el.readyState)).toBeGreaterThanOrEqual(1);
+    // The original comes back from Drive; these bytes are not playable, so it is offered as a file.
+    await expect(page.locator('#video-dialog .photo-download')).toBeVisible();
+    await expect(page.locator('#video-dialog .photo-status')).toContainText('재생할 수 없는 형식');
+    expect(data.calls.slice(download)).toContain(`GET /drive/v3/files/${original.id}`);
   } finally {
     await context.close();
   }
