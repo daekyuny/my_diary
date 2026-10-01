@@ -26,7 +26,7 @@ import {
   pageTitle,
   pageDescription,
   quickLabel,
-  weekday,
+  dateLabel,
   todayLabel,
   characterCount,
 } from './labels.js';
@@ -416,7 +416,7 @@ function renderReading() {
   $('#resolve-conflict').hidden = !conflictingRevision;
   $('#editor-form').classList.toggle('reading', !editing);
   $('#reading-title').textContent = entry.title || '제목 없는 일기';
-  $('#reading-date').textContent = entry.date;
+  $('#reading-date').textContent = dateLabel(entry.date);
   renderBody($('#reading-body'), entry.body);
   $('#reading-details').innerHTML = readingDetailsHTML(entry);
 }
@@ -457,7 +457,7 @@ function fillEditor() {
   $('#entry-body').value = entry.body;
   $('#entry-tags').value = entry.tags.join(', ');
   $('#entry-date').value = entry.date;
-  $('#entry-weekday').textContent = weekday(entry.date);
+  $('#entry-date-label').textContent = dateLabel(entry.date);
   $('#pin-entry').setAttribute('aria-pressed', String(Boolean(entry.pinned)));
   $('#pin-entry').setAttribute('aria-label', entry.pinned ? '상단 고정 해제' : '상단 고정');
   $('#archive-entry span:last-child').textContent = entry.archived ? '복원하기' : '삭제하기';
@@ -690,7 +690,15 @@ $('#entry-date').onchange = (e) => {
   if (validDate(e.target.value)) {
     entry.date = e.target.value;
     changed();
-    $('#entry-weekday').textContent = weekday(entry.date);
+    $('#entry-date-label').textContent = dateLabel(entry.date);
+  }
+};
+// The native date input sits invisibly over the formatted date; open its picker on click.
+$('#entry-date').onclick = (e) => {
+  try {
+    e.target.showPicker?.();
+  } catch {
+    /* Browsers without showPicker open their own picker on tap. */
   }
 };
 $('#new-entry').onclick = $('#bottom-new').onclick = () => task(() => openEntry(null, localDate()));

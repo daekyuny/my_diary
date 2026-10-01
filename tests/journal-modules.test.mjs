@@ -7,6 +7,8 @@ import {
   pageTitle,
   quickLabel,
   characterCount,
+  dateLabel,
+  monthLabel,
 } from '../src/journal/labels.js';
 import {
   readingDetailsHTML,
@@ -38,6 +40,13 @@ test('connection label prefers work in progress, then offline, then repository s
     'Google 재연결 필요',
   );
   assert.equal(connectionLabel({ ...base, connected: false, repository: null }), '기기에 저장');
+});
+
+test('date labels spell out year, month, day and weekday in Korean', () => {
+  assert.equal(dateLabel('2026-09-29'), '2026년 9월 29일 화요일');
+  assert.equal(dateLabel('2024-02-29'), '2024년 2월 29일 목요일');
+  assert.equal(dateLabel('2026-01-04'), '2026년 1월 4일 일요일');
+  assert.equal(monthLabel('2026-09'), '2026년 9월');
 });
 
 test('repository details count cloud diaries and trash separately', () => {

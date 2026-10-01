@@ -56,6 +56,24 @@ test('responsive journal writes separate same-day entries, searches and switches
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test('reading and editing show the same Korean date and the date picker stays labelled', async ({
+  page,
+}) => {
+  await newEntry(page);
+  await page.getByLabel('일기 날짜').fill('2026-08-07');
+  await expect(page.locator('#entry-date-label')).toHaveText('2026년 8월 7일 금요일');
+  await page.locator('#entry-title').fill('날짜 표기');
+  await saveClose(page);
+  await page.locator('.record').click();
+  await expect(page.locator('#reading-date')).toHaveText('2026년 8월 7일 금요일');
+  await page.locator('#edit-entry').click();
+  await expect(page.locator('#entry-date-label')).toHaveText('2026년 8월 7일 금요일');
+  const label = await page.locator('.editor-date').boundingBox();
+  const input = await page.locator('#entry-date').boundingBox();
+  expect(input.width).toBeCloseTo(label.width, 0);
+  expect(label.height).toBeGreaterThanOrEqual(44);
+});
+
 test('custom fields are removed from settings and the editor', async ({ page }) => {
   await settings(page);
   await expect(page.locator('#new-definition')).toHaveCount(0);

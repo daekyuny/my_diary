@@ -950,26 +950,37 @@ dialog::backdrop {
   gap: 12px;
 }
 .editor-date {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 7px;
+  min-height: 44px;
+  padding: 0 4px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: #738763;
+  cursor: pointer;
+}
+.editor-date:focus-within {
+  outline: 2px solid #75977a;
+  outline-offset: 2px;
 }
 .editor-date svg {
   width: 15px;
   height: 15px;
   color: #81936f;
 }
+/* The native picker stays usable and labelled but is drawn as the formatted date. */
 .editor-date input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
   border: 0;
-  background: none;
-  font-size: 13px;
-  color: #738763;
-  padding: 6px 0;
-  width: 145px;
-}
-.editor-date-row > span {
-  font-size: 11px;
-  color: #acb397;
+  opacity: 0;
+  cursor: pointer;
 }
 .editor-date-row #pin-entry {
   margin-left: auto;
@@ -1864,12 +1875,8 @@ dialog::backdrop {
   .editor-paper {
     padding: 23px 24px 15px;
   }
-  .editor-date input {
+  .editor-date {
     font-size: 12px;
-    width: 138px;
-  }
-  .editor-date-row > span {
-    font-size: 10px;
   }
   .entry-title {
     font-size: 25px;

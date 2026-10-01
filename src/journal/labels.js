@@ -35,8 +35,15 @@ export function pageDescription(collection) {
 export function quickLabel(view, day) {
   return view === 'calendar' && day ? `${day}에 새 기록 남기기` : '오늘 기록 남기기';
 }
-export function weekday(date) {
-  return new Date(`${date}T12:00:00`).toLocaleDateString('ko-KR', { weekday: 'long' });
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
+// One date style across reading, editing and the calendar: "2026년 9월 29일 화요일".
+export function dateLabel(date) {
+  const [year, month, day] = date.split('-').map(Number);
+  return `${year}년 ${month}월 ${day}일 ${WEEKDAYS[new Date(year, month - 1, day).getDay()]}요일`;
+}
+export function monthLabel(month) {
+  const [year, m] = month.split('-').map(Number);
+  return `${year}년 ${m}월`;
 }
 export function todayLabel(now = new Date()) {
   return now.toLocaleDateString('ko-KR', {
