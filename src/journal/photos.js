@@ -45,30 +45,87 @@ const waitFor = (target, event, ms) =>
       once: true,
     });
   });
-// A frame near the start of a video (1 s in, or halfway for shorter clips).
+const within = (promise, ms) =>
+  Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
+// Resolves once a decoded frame is on screen; Safari otherwise draws a blank canvas.
+const presented = (video) =>
+  within(
+    new Promise((resolve) =>
+      video.requestVideoFrameCallback
+        ? video.requestVideoFrameCallback(() => resolve())
+        : resolve(),
+    ),
+    1000,
+  );
+// A frame near the start of a video (1 s in, or halfway for shorter clips). iOS Safari only
+// loads and decodes a video that is in the document, so it is attached off screen, loaded
+// explicitly and, if data still does not arrive, started muted inline (always allowed).
 async function loadVideoFrame(blob) {
   const url = URL.createObjectURL(blob);
   const video = document.createElement('video');
   video.muted = true;
+  video.defaultMuted = true;
   video.playsInline = true;
+  video.setAttribute('playsinline', '');
   video.preload = 'auto';
-  try {
-    const metadata = waitFor(video, 'loadedmetadata', 8000);
-    video.src = url;
-    await metadata;
-    const duration = Number.isFinite(video.duration) ? video.duration : 0;
-    const seeked = waitFor(video, 'seeked', 5000);
-    video.currentTime = duration ? Math.min(1, duration / 2) : 0.1;
-    await seeked;
-    if (!video.videoWidth) throw new Error('no frame');
-    return { source: video, width: video.videoWidth, height: video.videoHeight, duration, url };
-  } catch (error) {
+  video.style.cssText =
+    'position:fixed;left:-10px;top:0;width:2px;height:2px;opacity:0;pointer-events:none';
+  document.body.append(video);
+  const release = () => {
+    video.removeAttribute('src');
+    video.load();
+    video.remove();
     URL.revokeObjectURL(url);
+  };
+  try {
+    const loaded = waitFor(video, 'loadeddata', 6000);
+    video.src = url;
+    video.load();
+    try {
+      await loaded;
+    } catch (error) {
+      if (error.message !== 'timeout') throw error;
+      await within(
+        video.play().catch(() => {}),
+        3000,
+      );
+      await waitFor(video, 'timeupdate', 5000);
+      video.pause();
+    }
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    const target = duration ? Math.min(1, duration / 2) : 0;
+    if (Math.abs(video.currentTime - target) > 0.05) {
+      const seeked = waitFor(video, 'seeked', 5000);
+      video.currentTime = target;
+      await seeked;
+    }
+    await presented(video);
+    if (!video.videoWidth) throw new Error('no frame');
+    return { source: video, width: video.videoWidth, height: video.videoHeight, duration, release };
+  } catch (error) {
+    release();
     throw error;
   }
 }
+// True when every sampled pixel has the same colour: the browser drew no video frame.
+function blank(canvas) {
+  const sample = document.createElement('canvas');
+  sample.width = sample.height = 8;
+  const context = sample.getContext('2d');
+  context.drawImage(canvas, 0, 0, 8, 8);
+  const data = context.getImageData(0, 0, 8, 8).data;
+  for (let i = 4; i < data.length; i += 4)
+    if (
+      Math.abs(data[i] - data[0]) +
+        Math.abs(data[i + 1] - data[1]) +
+        Math.abs(data[i + 2] - data[2]) >
+      6
+    )
+      return false;
+  return true;
+}
 // Draws a decoded source into a JPEG whose longer side is at most `side` pixels.
-async function drawJPEG({ source, width, height }, side, quality) {
+async function drawJPEG({ source, width, height }, side, quality, check) {
   const size = fitWithin(width, height, side);
   const canvas = document.createElement('canvas');
   canvas.width = size.width;
@@ -77,6 +134,7 @@ async function drawJPEG({ source, width, height }, side, quality) {
   context.fillStyle = '#fff';
   context.fillRect(0, 0, size.width, size.height);
   context.drawImage(source, 0, 0, size.width, size.height);
+  if (check?.(canvas)) return { blob: null, resized: false };
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
   return { blob, resized: size.width < width };
 }
@@ -97,9 +155,11 @@ function videoPlaceholder() {
   return { source: canvas, width: 480, height: 270 };
 }
 async function thumbnailFrom(blob, id) {
+  const video = /^video\//.test(blob.type);
   let frame,
-    duration = 0;
-  if (/^video\//.test(blob.type)) {
+    duration = 0,
+    thumbnail;
+  if (video) {
     try {
       frame = await loadVideoFrame(blob);
       duration = frame.duration;
@@ -108,14 +168,22 @@ async function thumbnailFrom(blob, id) {
     }
   } else frame = await loadImage(blob);
   try {
-    const { blob: thumbnail } = await drawJPEG(frame, 480, 0.78);
-    if (!thumbnail) throw new Error('미리보기를 만들지 못했습니다.');
-    const result = { id: `${id}-thumbnail`, name: `${id}-thumbnail.jpg`, type: 'image/jpeg' };
-    await store.put('assets', { ...result, blob: thumbnail });
-    return { thumbnail: result, duration };
+    ({ blob: thumbnail } = await drawJPEG(
+      frame,
+      480,
+      0.78,
+      video && frame.release ? blank : undefined,
+    ));
   } finally {
-    if (frame.url) URL.revokeObjectURL(frame.url);
+    if (frame.release) frame.release();
+    else if (frame.url) URL.revokeObjectURL(frame.url);
   }
+  // A video frame that came out as one flat colour gets the play-mark preview instead.
+  if (!thumbnail && video) ({ blob: thumbnail } = await drawJPEG(videoPlaceholder(), 480, 0.78));
+  if (!thumbnail) throw new Error('미리보기를 만들지 못했습니다.');
+  const result = { id: `${id}-thumbnail`, name: `${id}-thumbnail.jpg`, type: 'image/jpeg' };
+  await store.put('assets', { ...result, blob: thumbnail });
+  return { thumbnail: result, duration };
 }
 export async function makeThumbnail(blob, id) {
   return (await thumbnailFrom(blob, id)).thumbnail;

@@ -18,6 +18,8 @@ async function recordClip(page) {
       for (let frame = 0; frame < 24; frame++) {
         ctx.fillStyle = `hsl(${frame * 15} 70% 50%)`;
         ctx.fillRect(0, 0, 320, 180);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(160, 0, 160, 180);
         await new Promise((resolve) => setTimeout(resolve, 40));
       }
       recorder.stop();
@@ -45,6 +47,18 @@ test('videos attach with a frame preview, play in their own viewer and count on 
     .setInputFiles({ name: 'clip.webm', mimeType: 'video/webm', buffer: clip });
   await expect(page.locator('.video-preview img')).toBeVisible();
   await expect(page.locator('.video-preview')).toHaveAttribute('aria-label', '동영상 재생');
+  // The preview is a real frame (coloured left half), not the dark play-mark placeholder.
+  const corner = await page.locator('.video-preview img').evaluate(async (img) => {
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    return [...ctx.getImageData(10, 10, 1, 1).data.slice(0, 3)];
+  });
+  expect(corner).not.toEqual([43, 51, 45]);
+  expect(Math.max(...corner) - Math.min(...corner)).toBeGreaterThan(40);
   await page.locator('#save').click();
   await expect(page.locator('#editor-dialog')).not.toBeVisible();
   await expect(page.locator('.record [aria-label="동영상 1개"]')).toBeVisible();
