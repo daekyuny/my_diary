@@ -93,11 +93,21 @@ let draftWrite = Promise.resolve(),
   lastRefresh = 0;
 let view = ['list', 'board', 'calendar'].includes(settings.view) ? settings.view : 'list';
 const owner = () => ownerKey(account, settings);
-// Display preferences belong to this device and apply before the first render.
+// Display preferences belong to this device; index.html applies them before the first paint.
+const THEME_COLORS = { light: '#f6f5f0', dark: '#131714' };
 function applyDisplay() {
-  document.documentElement.dataset.textSize = ['small', 'large'].includes(settings.textSize)
+  const root = document.documentElement;
+  root.dataset.textSize = ['small', 'large'].includes(settings.textSize)
     ? settings.textSize
     : 'normal';
+  const theme = ['light', 'dark'].includes(settings.theme) ? settings.theme : 'system';
+  if (theme === 'system') delete root.dataset.theme;
+  else root.dataset.theme = theme;
+  // Each meta answers one system scheme; a forced theme gives both the same browser colour.
+  document.querySelectorAll('meta[name=theme-color]').forEach((meta) => {
+    const scheme = meta.media.includes('dark') ? 'dark' : 'light';
+    meta.content = THEME_COLORS[theme === 'system' ? scheme : theme];
+  });
 }
 applyDisplay();
 const persistSettings = () => saveSettings(settings);
@@ -581,6 +591,7 @@ async function closeEditor() {
 function openSettings() {
   $('#setting-client').value = settings.googleClientId || '';
   $('#text-size').value = document.documentElement.dataset.textSize;
+  $('#theme').value = document.documentElement.dataset.theme || 'system';
   connection();
   $('#settings-dialog').showModal();
 }
@@ -1000,6 +1011,11 @@ $('#open-settings').onclick =
   $('#bottom-settings').onclick =
     openSettings;
 $('#close-settings').onclick = () => $('#settings-dialog').close();
+$('#theme').onchange = (e) => {
+  settings.theme = e.target.value;
+  persistSettings();
+  applyDisplay();
+};
 $('#text-size').onchange = (e) => {
   settings.textSize = e.target.value;
   persistSettings();

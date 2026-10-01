@@ -235,6 +235,47 @@ test('search marks matches in cards and scrolls the opened diary to the first ma
   await expect(page.locator('#reading-body mark')).toHaveCount(0);
 });
 
+test('theme follows the system unless the device setting forces light or dark', async ({
+  page,
+}, info) => {
+  const background = () =>
+    page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor);
+  const light = await background();
+  await page.emulateMedia({ colorScheme: 'dark' });
+  const dark = await background();
+  expect(dark).not.toBe(light);
+  await newEntry(page);
+  await page.locator('#entry-title').fill('밤에 쓰는 일기');
+  await page.locator('#entry-body').fill('어두운 화면에서도 글자가 잘 보인다.');
+  await saveClose(page);
+  await page.screenshot({ path: `artifacts/journal-dark-${info.project.name}.png` });
+  await page.locator('.record').click();
+  await page.screenshot({ path: `artifacts/journal-reading-dark-${info.project.name}.png` });
+  await page.locator('#close-editor').click();
+  await expect(page.locator('#editor-dialog')).not.toBeVisible();
+  await settings(page);
+  await expect(page.locator('#theme')).toHaveValue('system');
+  await page.locator('#theme').selectOption('light');
+  expect(await background()).toBe(light);
+  await expect(page.locator('meta[name=theme-color][media*=dark]')).toHaveAttribute(
+    'content',
+    '#f6f5f0',
+  );
+  await page.locator('#close-settings').click();
+  // The saved choice applies before the app script runs, so a reload never flashes.
+  await page.emulateMedia({ colorScheme: 'light' });
+  await settings(page);
+  await page.locator('#theme').selectOption('dark');
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  expect(await background()).toBe(dark);
+  await settings(page);
+  await expect(page.locator('#theme')).toHaveValue('dark');
+  await page.locator('#theme').selectOption('system');
+  await expect(page.locator('html')).not.toHaveAttribute('data-theme');
+  expect(await background()).toBe(light);
+});
+
 test('custom fields are removed from settings and the editor', async ({ page }) => {
   await settings(page);
   await expect(page.locator('#new-definition')).toHaveCount(0);

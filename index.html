@@ -3,7 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#f6f5f0" />
+    <meta name="theme-color" content="#f6f5f0" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#131714" media="(prefers-color-scheme: dark)" />
+    <script>
+      // Apply the device's theme and text size before the first paint (see applyDisplay).
+      try {
+        const saved = JSON.parse(localStorage.getItem('my-diary-sheets-settings') || '{}');
+        if (['light', 'dark'].includes(saved.theme))
+          document.documentElement.dataset.theme = saved.theme;
+        if (['small', 'large'].includes(saved.textSize))
+          document.documentElement.dataset.textSize = saved.textSize;
+      } catch {}
+    </script>
     <meta
       name="description"
       content="어디서든 이어 쓰는 나의 하루. 내 Google Drive 앱 전용 공간에 보관하는 개인 일기장."
@@ -315,13 +326,20 @@
         <section>
           <h3>화면</h3>
           <label class="form-label"
+            >테마<select id="theme">
+              <option value="system">시스템 설정 따르기</option>
+              <option value="light">밝게</option>
+              <option value="dark">어둡게</option>
+            </select></label
+          >
+          <label class="form-label"
             >읽기 글자 크기<select id="text-size">
               <option value="small">작게</option>
               <option value="normal">보통</option>
               <option value="large">크게</option>
             </select></label
           >
-          <p class="muted">이 기기에서 읽기와 쓰기 화면의 본문 크기를 바꿉니다.</p>
+          <p class="muted">테마와 글자 크기는 이 기기에만 적용됩니다.</p>
         </section>
         <section>
           <h3>기기 보관과 휴지통</h3>
