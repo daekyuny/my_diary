@@ -11,6 +11,13 @@
   --line: #e5e6dd;
   --paper: #fffefa;
   --soft: #eaf0e4;
+  --body-size: 16px;
+}
+:root[data-text-size='small'] {
+  --body-size: 14px;
+}
+:root[data-text-size='large'] {
+  --body-size: 19px;
 }
 * {
   box-sizing: border-box;
@@ -1010,7 +1017,7 @@ dialog::backdrop {
   min-height: 300px;
   resize: vertical;
   padding: 17px 0 28px;
-  font-size: 15px;
+  font-size: var(--body-size);
   line-height: 2.1;
   color: #56634f;
 }
@@ -1883,7 +1890,6 @@ dialog::backdrop {
     padding-top: 19px;
   }
   #entry-body {
-    font-size: 16px;
     min-height: 38dvh;
     line-height: 2;
     padding: 20px 0 26px;
@@ -2091,6 +2097,7 @@ dialog::backdrop {
 #reading-body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  font-size: var(--body-size);
   line-height: 1.9;
   margin: 24px 0;
 }
@@ -2333,4 +2340,32 @@ dialog::backdrop {
 }
 .editor-toolbar [data-apply-update] {
   margin-left: auto;
+}
+
+/* Reading mode: step to neighbouring diaries; the character count only matters while editing. */
+.reading-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: -10px;
+}
+.reading-nav #entry-position {
+  min-width: 52px;
+  font-size: 11px;
+  color: #90a07c;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.editor-toolbar .reading-nav svg {
+  width: 18px;
+  height: 18px;
+}
+#editor-form.reading #close-editor {
+  margin-left: auto;
+}
+/* iOS zooms into text fields under 16px, so touch devices keep the editor at least that big. */
+@media (pointer: coarse) {
+  #entry-body {
+    font-size: max(16px, var(--body-size));
+  }
 }

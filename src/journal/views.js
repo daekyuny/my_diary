@@ -72,6 +72,16 @@ export function cards(groups, view, hasFilter = false) {
     })
     .join('');
 }
+// Reading mode steps through the list exactly as it is shown (filters, order, calendar day).
+export function readingPosition(list, id) {
+  const index = list.findIndex(({ latest }) => latest.entry.id === id);
+  return {
+    index,
+    total: list.length,
+    previous: index > 0 ? list[index - 1].latest.entry.id : '',
+    next: index >= 0 && index < list.length - 1 ? list[index + 1].latest.entry.id : '',
+  };
+}
 // The "write today" line only nudges while today's diary is missing; a day picked in the
 // calendar keeps it as the way to add a record for that day.
 export function quickEntryVisible(groups, { collection, view, day, today = localDate() }) {

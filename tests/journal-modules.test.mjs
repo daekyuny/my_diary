@@ -17,6 +17,7 @@ import {
   repositoryOptionsHTML,
   quickEntryVisible,
   cards,
+  readingPosition,
 } from '../src/journal/views.js';
 import { batches } from '../src/journal/cloud-sync.js';
 import { nextRevision } from '../src/journal/current.js';
@@ -117,6 +118,14 @@ test('editor HTML escapes user content and hides events when the template is off
     repositoryOptionsHTML([{ id: 'abcdefghijkl', name: 'A<' }]),
     '<option value="abcdefghijkl">A&lt; · efghijkl</option>',
   );
+});
+
+test('reading position follows the shown list and stops at both ends', () => {
+  const list = ['a', 'b', 'c'].map((id) => ({ latest: { entry: { id } } }));
+  assert.deepEqual(readingPosition(list, 'a'), { index: 0, total: 3, previous: '', next: 'b' });
+  assert.deepEqual(readingPosition(list, 'b'), { index: 1, total: 3, previous: 'a', next: 'c' });
+  assert.deepEqual(readingPosition(list, 'c'), { index: 2, total: 3, previous: 'b', next: '' });
+  assert.deepEqual(readingPosition(list, 'x'), { index: -1, total: 3, previous: '', next: '' });
 });
 
 test('sync batches cap the item count and stop before exceeding the byte budget', () => {

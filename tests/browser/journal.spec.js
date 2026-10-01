@@ -74,6 +74,85 @@ test('reading and editing show the same Korean date and the date picker stays la
   expect(label.height).toBeGreaterThanOrEqual(44);
 });
 
+test('reading mode steps through the shown list, hides the count and follows the text size', async ({
+  page,
+}, info) => {
+  await page.evaluate(async () => {
+    const model = await import('/src/model.js'),
+      store = await import('/src/storage.js');
+    await store.openStore('sheets-local');
+    for (const [date, title] of [
+      ['2026-09-03', '셋째 날'],
+      ['2026-09-02', '둘째 날'],
+      ['2026-09-01', '첫째 날'],
+    ])
+      await store.put(
+        'revisions',
+        model.makeRevision({ ...model.newEntry(date), title, body: `${title}의 본문` }),
+      );
+  });
+  await page.reload();
+  await expect(page.locator('.record')).toHaveCount(3);
+  await page.locator('.record').first().click();
+  await expect(page.locator('#reading-title')).toHaveText('셋째 날');
+  await expect(page.locator('#entry-position')).toHaveText('1 / 3');
+  await expect(page.locator('#prev-entry')).toBeDisabled();
+  await expect(page.locator('#word-count')).toBeHidden();
+  await page.locator('#next-entry').click();
+  await expect(page.locator('#reading-title')).toHaveText('둘째 날');
+  await expect(page.locator('#next-entry')).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('#reading-title')).toHaveText('첫째 날');
+  await expect(page.locator('#next-entry')).toBeDisabled();
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('#reading-title')).toHaveText('둘째 날');
+  if (info.project.name === 'mobile-chromium') {
+    // A left swipe turns to the next diary, as in a book.
+    await page.locator('#reading-body').dispatchEvent('touchstart', {
+      touches: [{ identifier: 1, clientX: 300, clientY: 300 }],
+      changedTouches: [{ identifier: 1, clientX: 300, clientY: 300 }],
+    });
+    await page.locator('#reading-body').dispatchEvent('touchend', {
+      touches: [],
+      changedTouches: [{ identifier: 1, clientX: 120, clientY: 310 }],
+    });
+    await expect(page.locator('#reading-title')).toHaveText('첫째 날');
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.locator('#reading-title')).toHaveText('둘째 날');
+  }
+  // Editing pins the diary in place: arrows move the caret instead of the page.
+  await page.locator('#edit-entry').click();
+  await expect(page.locator('#word-count')).toBeVisible();
+  await expect(page.locator('#prev-entry')).toBeHidden();
+  await page.locator('#entry-body').press('ArrowRight');
+  await expect(page.locator('#entry-title')).toHaveValue('둘째 날');
+  await page.locator('#close-editor').click();
+  // The search narrows what the arrows walk through.
+  await page.locator('#search').fill('첫째');
+  await expect(page.locator('.record')).toHaveCount(1);
+  await page.locator('.record').click();
+  await expect(page.locator('#entry-position')).toHaveText('1 / 1');
+  await expect(page.locator('#next-entry')).toBeDisabled();
+  const normal = await page
+    .locator('#reading-body')
+    .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  await page.locator('#close-editor').click();
+  await settings(page);
+  await page.locator('#text-size').selectOption('large');
+  await page.locator('#close-settings').click();
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-text-size', 'large');
+  await page.locator('.record').first().click();
+  const large = await page
+    .locator('#reading-body')
+    .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(large).toBeGreaterThan(normal);
+  await page.locator('#edit-entry').click();
+  expect(
+    await page.locator('#entry-body').evaluate((el) => parseFloat(getComputedStyle(el).fontSize)),
+  ).toBe(large);
+});
+
 test('custom fields are removed from settings and the editor', async ({ page }) => {
   await settings(page);
   await expect(page.locator('#new-definition')).toHaveCount(0);

@@ -15,6 +15,7 @@ const paths = {
   arrow: 'M5 12h14m-6-6 6 6-6 6',
   back: 'M19 12H5m6-6-6 6 6 6',
   chevron: 'm9 5 7 7-7 7',
+  chevronLeft: 'm15 5-7 7 7 7',
   close: 'm6 6 12 12M6 18 18 6',
   photo: 'M3 3h18v18H3ZM3 17l6-6 4 4 3-3 5 5M15 7h.01',
   download: 'M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5',

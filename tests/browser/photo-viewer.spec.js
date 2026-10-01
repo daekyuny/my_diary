@@ -171,3 +171,31 @@ test('photo viewer pinch zoom and two-finger pan preserve bounds and refit after
     })
     .toBeLessThan(0.001);
 });
+
+test('arrow keys pan the open photo instead of turning to another diary', async ({ page }) => {
+  await open(page);
+  await action(page, 'close').click();
+  await page.locator('#entry-title').fill('사진 있는 날');
+  await page.locator('#save').click();
+  await expect(page.locator('#editor-dialog')).not.toBeVisible();
+  await page.evaluate(async () => {
+    const model = await import('/src/model.js'),
+      store = await import('/src/storage.js');
+    await store.openStore('sheets-local');
+    await store.put(
+      'revisions',
+      model.makeRevision({ ...model.newEntry('2000-01-01'), title: '오래전 하루' }),
+    );
+  });
+  await page.reload();
+  await expect(page.locator('.record')).toHaveCount(2);
+  await page.locator('.record').first().click();
+  await expect(page.locator('#next-entry')).toBeEnabled();
+  await page.locator('[data-open-photo]').click();
+  await expect(page.locator('#photo-dialog .original-photo')).toBeVisible();
+  await action(page, 'actual').click();
+  await page.locator('.photo-stage').focus();
+  await page.keyboard.press('ArrowRight');
+  await action(page, 'close').click();
+  await expect(page.locator('#reading-title')).toHaveText('사진 있는 날');
+});

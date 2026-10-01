@@ -169,6 +169,26 @@
     <dialog id="editor-dialog" class="editor-dialog">
       <form id="editor-form">
         <header class="editor-toolbar">
+          <div class="reading-nav read-only" role="group" aria-label="일기 이동">
+            <button
+              id="prev-entry"
+              type="button"
+              class="icon-button"
+              aria-label="이전 일기"
+              title="이전 일기 (←)"
+            >
+              <span data-icon="chevronLeft"></span></button
+            ><span id="entry-position"></span
+            ><button
+              id="next-entry"
+              type="button"
+              class="icon-button"
+              aria-label="다음 일기"
+              title="다음 일기 (→)"
+            >
+              <span data-icon="chevron"></span>
+            </button>
+          </div>
           <span id="save-state" role="status">새 기록</span
           ><button type="button" class="button" data-apply-update hidden>업데이트 적용</button>
         </header>
@@ -238,7 +258,8 @@
             <span data-icon="photo"></span>사진</button
           ><button id="archive-entry" type="button">
             <span data-icon="archive"></span><span>삭제하기</span></button
-          ><span id="word-count">0자</span><button id="close-editor" type="button">닫기</button
+          ><span id="word-count" class="edit-only">0자</span
+          ><button id="close-editor" type="button">닫기</button
           ><button id="save" class="primary edit-only" type="submit" disabled>저장</button>
         </footer>
       </form>
@@ -290,6 +311,17 @@
             일기와 사진은 Drive의 앱 전용 공간에 보관합니다. 파일은 아래 전체 백업으로 내보낼 수
             있습니다.
           </p>
+        </section>
+        <section>
+          <h3>화면</h3>
+          <label class="form-label"
+            >읽기 글자 크기<select id="text-size">
+              <option value="small">작게</option>
+              <option value="normal">보통</option>
+              <option value="large">크게</option>
+            </select></label
+          >
+          <p class="muted">이 기기에서 읽기와 쓰기 화면의 본문 크기를 바꿉니다.</p>
         </section>
         <section>
           <h3>기기 보관과 휴지통</h3>

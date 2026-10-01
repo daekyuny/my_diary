@@ -18,6 +18,7 @@ import {
   calendarChoiceHTML,
   repositoryOptionsHTML,
   quickEntryVisible,
+  readingPosition,
 } from './views.js';
 import {
   connectionLabel,
@@ -91,6 +92,13 @@ let draftWrite = Promise.resolve(),
   lastRefresh = 0;
 let view = ['list', 'board', 'calendar'].includes(settings.view) ? settings.view : 'list';
 const owner = () => ownerKey(account, settings);
+// Display preferences belong to this device and apply before the first render.
+function applyDisplay() {
+  document.documentElement.dataset.textSize = ['small', 'large'].includes(settings.textSize)
+    ? settings.textSize
+    : 'normal';
+}
+applyDisplay();
 const persistSettings = () => saveSettings(settings);
 const working = () => busy || syncing || connecting;
 function locks(value) {
@@ -192,6 +200,7 @@ function connection() {
     $('#trash-days').value = String(repository?.retentionDays ?? settings.trashDays ?? 30);
   $('#move-local').hidden = !account || !repository;
   $('#repository-details').textContent = repositoryDetails(repository, pending, online);
+  if (entry && !editing) readingNav();
   if (entry)
     $('#save-state').textContent = saveStateLabel({
       dirty,
@@ -210,6 +219,9 @@ function filter() {
     order: $('#sort').value,
   };
 }
+function shownGroups(base = filter()) {
+  return visibleGroups(groups, { ...base, ...(view === 'calendar' ? { month, day } : {}) });
+}
 function render() {
   const tags = [...new Set(groups.flatMap((g) => g.latest.entry.tags))].sort(),
     tag = $('#tag-filter').value;
@@ -218,7 +230,7 @@ function render() {
   $('#sidebar-labels').innerHTML = tagLinksHTML(tags, tag);
   $('#tag-suggestions').innerHTML = tagSuggestionsHTML(tags);
   const base = filter(),
-    shown = visibleGroups(groups, { ...base, ...(view === 'calendar' ? { month, day } : {}) });
+    shown = shownGroups(base);
   $('#records').className = `records ${view === 'board' ? 'board' : 'list'}`;
   $('#records').innerHTML =
     cards(
@@ -445,6 +457,49 @@ $('#resolve-conflict').onclick = () => {
       await save();
     });
 };
+function readingNav() {
+  const { index, total, previous, next } = readingPosition(shownGroups(), entry.id);
+  $('#entry-position').textContent = index < 0 ? '' : `${index + 1} / ${total}`;
+  $('#prev-entry').disabled = busy || !previous;
+  $('#next-entry').disabled = busy || !next;
+}
+// Step to the neighbouring diary in reading mode only; edits and other dialogs stay put.
+function moveEntry(step, trigger = null) {
+  if (!entry || editing || dirty || busy || $('#photo-dialog')?.open || $('#small-dialog').open)
+    return;
+  const position = readingPosition(shownGroups(), entry.id);
+  const id = step < 0 ? position.previous : position.next;
+  if (!id) return;
+  task(async () => {
+    await openEntry(id);
+    $('#editor-dialog').scrollTop = 0;
+    const after = readingPosition(shownGroups(), id);
+    if (trigger && (step < 0 ? after.previous : after.next)) desiredFocus = trigger;
+  });
+}
+$('#prev-entry').onclick = (e) => moveEntry(-1, e.currentTarget);
+$('#next-entry').onclick = (e) => moveEntry(1, e.currentTarget);
+let swipe = null;
+$('#editor-form').addEventListener(
+  'touchstart',
+  (e) => {
+    swipe =
+      !editing && e.touches.length === 1
+        ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        : null;
+  },
+  { passive: true },
+);
+$('#editor-form').addEventListener('touchend', (e) => {
+  if (!swipe) return;
+  const touch = e.changedTouches[0],
+    dx = touch.clientX - swipe.x,
+    dy = touch.clientY - swipe.y;
+  swipe = null;
+  // A mostly horizontal stroke turns the page; selecting text with a long press does not.
+  if (Math.abs(dx) > 70 && Math.abs(dy) < Math.abs(dx) * 0.5 && !String(getSelection()))
+    moveEntry(dx < 0 ? 1 : -1);
+});
 $('#edit-entry').onclick = () => {
   editing = true;
   renderReading();
@@ -517,6 +572,7 @@ async function closeEditor() {
 }
 function openSettings() {
   $('#setting-client').value = settings.googleClientId || '';
+  $('#text-size').value = document.documentElement.dataset.textSize;
   connection();
   $('#settings-dialog').showModal();
 }
@@ -917,6 +973,11 @@ $('#open-settings').onclick =
   $('#bottom-settings').onclick =
     openSettings;
 $('#close-settings').onclick = () => $('#settings-dialog').close();
+$('#text-size').onchange = (e) => {
+  settings.textSize = e.target.value;
+  persistSettings();
+  applyDisplay();
+};
 $('#close-small').onclick = () => {
   $('#small-dialog').close();
   $('#small-body').onclick = null;
@@ -1067,6 +1128,18 @@ window.addEventListener('beforeunload', (e) => {
   }
 });
 document.addEventListener('keydown', (e) => {
+  if (
+    ['ArrowLeft', 'ArrowRight'].includes(e.key) &&
+    !(e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) &&
+    $('#editor-dialog').open &&
+    !e.target.matches('input,textarea,select,[contenteditable]')
+  ) {
+    if (!editing && !$('#photo-dialog')?.open) {
+      e.preventDefault();
+      moveEntry(e.key === 'ArrowLeft' ? -1 : 1);
+    }
+    return;
+  }
   if (!(e.ctrlKey || e.metaKey)) return;
   if (e.key.toLowerCase() === 's' && entry) {
     e.preventDefault();
