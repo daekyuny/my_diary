@@ -46,7 +46,7 @@
 
 ## 계획
 
-- [x] `diaryAuth` 요청 로그(9/21~10/15) 분석: 9/29 이후 `/auth/token` 401 → `/auth/code` 재로그인 약 15회, 간격 14시간~3일
+- [x] `diaryAuth` 요청 로그(9/21부터 10/15까지) 분석: 9/29 이후 `/auth/token` 401 → `/auth/code` 재로그인 약 15회, 간격 14시간에서 3일
 - [x] OAuth 동의 화면 상태 확인: Production(사용자 확인). Testing 7일 만료는 원인이 아니다
 - [x] 서버가 401 사유를 남기도록 진단 로그 추가(`session.js`의 `open`, `handler.js`), 단위 테스트 3개
 - [x] `npm test`(54 통과), `npm run format:check`, `git diff --check`
