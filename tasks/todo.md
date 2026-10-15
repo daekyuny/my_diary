@@ -41,3 +41,20 @@
 - 동영상 재개 가능 업로드는 Node 가짜 fetch와 Playwright 모의 Drive로 검증했다. 실제 Google 서버 응답(Location 노출, 308)은 첫 실제 업로드에서 확인이 필요하다.
 - WebKit(iPhone) 테스트는 이 PC에서 실행하지 않았다. CI에서 확인한다. 특히 iOS의 동영상 썸네일(seek 후 프레임)과 `showPicker`는 실제 기기 확인이 필요하다.
 - 2026-10-01 push 후 CI에서 세 가지가 드러나 고친 뒤 배포했다(실행 36824212522). ① 창이 열리기 전 첨부가 무시되는 테스트 순서 문제, ② WebKit에서 수정 버튼 포커스가 검색 일치 스크롤을 맨 위로 되돌림(앱 수정: 다음 프레임에 스크롤), ③ Linux WebKit에 MediaRecorder 없음. 업데이트 테스트는 부하 시 30초를 넘겨 60초로 늘렸다.
+
+# Google 재로그인 원인 진단 (2026-10-15)
+
+## 계획
+
+- [x] `diaryAuth` 요청 로그(9/21~10/15) 분석: 9/29 이후 `/auth/token` 401 → `/auth/code` 재로그인 약 15회, 간격 14시간~3일
+- [x] OAuth 동의 화면 상태 확인: Production(사용자 확인). Testing 7일 만료는 원인이 아니다
+- [x] 서버가 401 사유를 남기도록 진단 로그 추가(`session.js`의 `open`, `handler.js`), 단위 테스트 3개
+- [x] `npm test`(54 통과), `npm run format:check`, `git diff --check`
+- [ ] 커밋·함수 배포(사용자 승인 후), 다음 재로그인 뒤 로그 확인
+- [ ] 원인에 맞춘 수정
+
+## 검토
+
+- 401 응답 크기가 모두 317바이트로 같고 앱 로그(stderr)가 한 건도 없다. 그래서 Google `invalid_grant`가 아니라 서버가 쿠키를 받지 못했거나 해독하지 못한 경우로 보인다.
+- 요청 크기로 보면 실패한 첫 요청에는 쿠키가 실려 있었고 이어진 재시도에는 없었다. 서버는 이 경로에서 쿠키를 지우지 않으므로 아직 설명되지 않는다. 새 로그의 `session`(missing·empty·undecryptable·malformed·expired), `cookies`(같은 이름 쿠키 수), `length`로 가린다.
+- 함수 리비전은 기간 내내 `diaryauth-00005-rim` 하나여서 비밀값이 바뀐 것은 아니다.
