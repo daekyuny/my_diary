@@ -20,7 +20,7 @@
 
 ## Build, Test, and Development Commands
 
-Node.js 22 이상. 처음에는 `npm ci`를 실행합니다.
+Node.js 22 이상. 처음에는 `npm ci`를 실행합니다. `npm ci`가 `core.hooksPath`를 `scripts/git-hooks`로 설정하므로 push 전에 `npm test`와 `npm run format:check`가 자동으로 돌고, 실패하면 push가 멈춥니다.
 
 ```bash
 npm run dev            # http://localhost:4173, 번들과 아이콘을 생성한 뒤 정적 서비스

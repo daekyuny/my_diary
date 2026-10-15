@@ -1,0 +1,6 @@
+#!/bin/sh
+# CI(.github/workflows/deploy.yml)의 빠른 검사를 push 전에 먼저 돌린다.
+# 급할 때는 git push --no-verify로 건너뛸 수 있다.
+set -e
+npm test --silent
+npm run format:check --silent

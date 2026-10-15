@@ -14,7 +14,8 @@
     "test:e2e": "playwright test --project=chromium --project=mobile-chromium",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test:webkit": "playwright test --project=iphone"
+    "test:webkit": "playwright test --project=iphone",
+    "prepare": "git config core.hooksPath scripts/git-hooks || true"
   },
   "dependencies": {
     "fflate": "^0.8.2"

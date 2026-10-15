@@ -25,3 +25,4 @@
 
 - 상황: `npm run format:check`를 통과시킨 다음 `tasks/todo.md`에 검토 내용을 덧붙이고 다시 검사하지 않은 채 push해 CI가 포맷 검사에서 실패했다. 물결표 두 개(`9/21~10/15 … 14시간~3일`)를 Prettier가 취소선(`~~`)으로 바꾸는 문제였다.
 - 규칙: 커밋 직전에 `npm run format:check`와 `git diff --check`를 마지막으로 한 번 더 실행한다. 마크다운의 범위 표기는 물결표 대신 "부터·까지"나 `–`를 쓴다.
+- 후속: `scripts/git-hooks/pre-push`가 push 전에 `npm test`와 `npm run format:check`를 실행한다(`npm ci`의 `prepare`가 `core.hooksPath`를 설정).
