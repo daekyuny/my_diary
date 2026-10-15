@@ -1,4 +1,4 @@
-import { seal, unseal, cookie } from './session.js';
+import { seal, open, cookie } from './session.js';
 const CLIENT = '805909518243-3g88j6fhfkr7h4morn30r9cln0f2j070.apps.googleusercontent.com';
 const ORIGINS = new Set([
   'https://daekyuny-diary.web.app',
@@ -15,9 +15,17 @@ export async function handleAuth(req, res, { secret, fetch = globalThis.fetch })
   const encoded = (req.get('cookie') || '')
     .split(';')
     .map((s) => s.trim())
-    .find((s) => s.startsWith('__session='))
-    ?.slice(10);
-  const session = encoded ? unseal(encoded, secret) : null;
+    .filter((s) => s.startsWith('__session='))
+    .map((s) => s.slice(10));
+  const opened = encoded.length ? open(encoded[0], secret) : { reason: 'missing' };
+  const session = opened.data ?? null;
+  // Cookie shape only, never its value: enough to tell a lost cookie from a rejected one.
+  const cookieState = {
+    session: opened.data ? 'valid' : opened.reason,
+    cookies: encoded.length,
+    length: encoded[0]?.length ?? 0,
+    ...(opened.expires && { expiredHours: Math.round((Date.now() - opened.expires) / 3600000) }),
+  };
   const action = req.path.split('/').at(-1);
   if (action === 'logout') {
     res.set('Set-Cookie', cookie('', 0));
@@ -33,6 +41,7 @@ export async function handleAuth(req, res, { secret, fetch = globalThis.fetch })
     params.set('grant_type', 'refresh_token');
     params.set('refresh_token', session.refresh);
   } else {
+    if (action === 'token') console.warn('diary_auth_session_rejected', cookieState);
     res.status(401).json({ error: 'Google 최초 연결이 필요합니다.' });
     return;
   }
@@ -55,7 +64,13 @@ export async function handleAuth(req, res, { secret, fetch = globalThis.fetch })
           'Google 인증 코드 또는 연결 권한이 만료되었거나 유효하지 않습니다. 다시 연결해주세요. (invalid_grant)',
       };
       const reason = Object.hasOwn(errors, tokens.error) ? tokens.error : 'unknown_oauth_error';
-      console.warn('diary_auth_exchange_failed', { action, reason, status: response.status });
+      // Google's description (e.g. "Token has been expired or revoked.") names no user data.
+      console.warn('diary_auth_exchange_failed', {
+        action,
+        reason,
+        status: response.status,
+        description: String(tokens.error_description || '').slice(0, 200),
+      });
       if (tokens.error === 'invalid_grant') res.set('Set-Cookie', cookie('', 0));
       res.status(tokens.error === 'invalid_grant' ? 401 : 502).json({
         error:
@@ -70,6 +85,13 @@ export async function handleAuth(req, res, { secret, fetch = globalThis.fetch })
         .json({ error: '장기 연결 권한이 없습니다. Google 연결 권한을 다시 승인해주세요.' });
       return;
     }
+    // A time-limited grant reports refresh_token_expires_in; record it with the prior cookie.
+    if (action === 'code' || tokens.refresh_token_expires_in)
+      console.info('diary_auth_granted', {
+        action,
+        previous: cookieState,
+        refreshExpiresIn: tokens.refresh_token_expires_in ?? null,
+      });
     const expires = tokens.refresh_token ? Date.now() + 15552000000 : session.expires;
     res.set(
       'Set-Cookie',

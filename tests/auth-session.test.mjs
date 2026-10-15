@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { seal, unseal, cookie } from '../server/session.js';
+import { seal, unseal, open, cookie } from '../server/session.js';
 test('refresh session is encrypted, authenticated and expires', () => {
   const secret = 'test-only-server-secret';
   const value = seal({ refresh: 'private-refresh-token', expires: 2000 }, secret);
@@ -119,4 +119,63 @@ test('OAuth failures identify configuration errors without exposing provider det
     if (reason !== 'unexpected') assert.ok(result.body.error.includes(reason));
     assert.ok(!JSON.stringify(result.body).includes('private-'));
   }
+});
+
+test('session rejections report why without revealing the cookie', () => {
+  const secret = 'test-only-server-secret';
+  assert.equal(open('', secret).reason, 'empty');
+  assert.equal(open('not-a-session', secret).reason, 'undecryptable');
+  assert.equal(open(seal({ expires: 2000 }, secret), secret, 1000).reason, 'malformed');
+  const expired = open(seal({ refresh: 'r', expires: 2000 }, secret), secret, 3000);
+  assert.deepEqual(expired, { reason: 'expired', expires: 2000 });
+  assert.equal(open(seal({ refresh: 'r', expires: 2000 }, secret), secret, 1000).data.refresh, 'r');
+});
+
+test('refresh without a usable cookie logs the cookie state but not its value', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const secret = 'test-only-server-secret';
+  for (const [cookieHeader, session, cookies] of [
+    ['', 'missing', 0],
+    ['other=1; __session=private-garbage', 'undecryptable', 1],
+    ['__session=; __session=private-second', 'empty', 2],
+  ]) {
+    const result = response();
+    await handleAuth(request('/auth/token', cookieHeader), result, { secret });
+    assert.equal(result.code, 401);
+    const [label, detail] = warn.mock.calls.at(-1).arguments;
+    assert.equal(label, 'diary_auth_session_rejected');
+    assert.equal(detail.session, session);
+    assert.equal(detail.cookies, cookies);
+    assert.ok(!JSON.stringify(detail).includes('private-'));
+  }
+});
+
+test('Google refusals and new grants are logged with their reason and grant lifetime', async (t) => {
+  const warn = t.mock.method(console, 'warn', () => {});
+  const info = t.mock.method(console, 'info', () => {});
+  const secret = 'test-only-server-secret';
+  const valid = `__session=${seal({ refresh: 'r', expires: Date.now() + 60000 }, secret)}`;
+  await handleAuth(request('/auth/token', valid), response(), {
+    secret,
+    fetch: async () =>
+      Response.json(
+        { error: 'invalid_grant', error_description: 'Token has been expired or revoked.' },
+        { status: 400 },
+      ),
+  });
+  assert.equal(warn.mock.calls[0].arguments[1].description, 'Token has been expired or revoked.');
+  await handleAuth(request('/auth/code', '__session=stale'), response(), {
+    secret,
+    fetch: async () =>
+      Response.json({
+        access_token: 'a',
+        refresh_token: 'r',
+        refresh_token_expires_in: 86400,
+        expires_in: 3600,
+      }),
+  });
+  const [label, detail] = info.mock.calls[0].arguments;
+  assert.equal(label, 'diary_auth_granted');
+  assert.equal(detail.previous.session, 'undecryptable');
+  assert.equal(detail.refreshExpiresIn, 86400);
 });
